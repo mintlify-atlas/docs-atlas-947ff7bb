@@ -1,0 +1,123 @@
+---
+title: "Scaling and Autoscaling Mikrom Applications"
+sidebarTitle: "Scaling"
+description: "Configure fixed replica counts or CPU and memory-based autoscaling for Mikrom apps, with built-in scale-to-zero behaviour for idle workloads."
+---
+
+Mikrom gives you two scaling modes for every application: a fixed replica count that you control manually, and an autoscaling policy that adjusts replicas automatically based on CPU and memory utilisation thresholds. Both modes sit on top of a platform-level scale-to-zero behaviour — when no traffic reaches your application for a period, Mikrom terminates the running microVMs and restores them on the next incoming request, keeping idle costs near zero.
+
+<Note>
+  **Scale to zero is always active.** Regardless of your scaling configuration, Mikrom will scale your application to zero replicas after a period of inactivity. The first request after a cold start incurs a short microVM boot latency (~125–200 ms depending on the hypervisor). If your workload cannot tolerate cold starts, set `--min 1` in your autoscaling policy to keep at least one replica warm at all times.
+</Note>
+
+## Resource Presets Reminder
+
+Scaling adjusts the number of replicas. Each replica is a separate microVM provisioned with the resource preset you specified at deploy time.
+
+| Resource | Available Values | Default |
+|----------|-----------------|---------|
+| CPU cores | `1`, `2`, `3`, `4` | `1` |
+| Memory | `512M`, `1G`, `2G`, `4G` | `512M` |
+
+To change the resource allocation per replica, re-deploy the application with new `--cpu` and `--memory` values. See [Deploying Applications](/deployment/apps) for details.
+
+## Scaling Configurations
+
+<Tabs>
+  <Tab title="Fixed Replicas">
+    Fixed scaling sets an exact replica count and disables autoscaling entirely. Mikrom will maintain that number of running microVMs regardless of traffic load, subject to the platform's scale-to-zero override on inactivity.
+
+    ```bash
+    mikrom app scale --name my-app --replicas 2
+    ```
+
+    | Flag | Range | Description |
+    |------|-------|-------------|
+    | `--replicas` | `0`–`3` | Desired fixed replica count; disables autoscaling |
+
+    Setting `--replicas 0` stops all instances immediately and keeps the app quiesced until you rescale or until an incoming request triggers a cold start.
+
+    <Note>
+      Passing `--replicas` always **disables autoscaling** for that application, even if an autoscaling policy was previously configured. To re-enable autoscaling, use `--auto true` as shown in the Autoscaling tab.
+    </Note>
+  </Tab>
+  <Tab title="Autoscaling">
+    Autoscaling adjusts the replica count within a defined band whenever CPU or memory utilisation crosses a threshold. The platform evaluates metrics continuously and scales up or down to keep utilisation close to the target thresholds.
+
+    ```bash
+    mikrom app scale \
+      --name my-app \
+      --auto true \
+      --min 1 \
+      --max 3 \
+      --cpu 70 \
+      --mem 80
+    ```
+
+    | Flag | Range | Description |
+    |------|-------|-------------|
+    | `--auto` | `true` / `false` | Enable or disable autoscaling |
+    | `--min` | `0`–`3` | Minimum replica count (can be 0 for scale-to-zero) |
+    | `--max` | `1`–`3` | Maximum replica count the policy may create |
+    | `--cpu` | Percentage | Scale up when average CPU exceeds this threshold |
+    | `--mem` | Percentage | Scale up when average memory exceeds this threshold |
+
+    When both `--cpu` and `--mem` are provided, the policy scales up if **either** threshold is breached, and scales down only when **both** metrics are below their thresholds.
+
+    To disable autoscaling without setting a fixed replica count, pass `--auto false`:
+
+    ```bash
+    mikrom app scale --name my-app --auto false
+    ```
+  </Tab>
+</Tabs>
+
+## Scaling Examples
+
+### Keep one warm replica, scale up under load
+
+This configuration ensures the application always has at least one running instance (avoiding cold starts) but can burst to three replicas when CPU exceeds 60%.
+
+```bash
+mikrom app scale \
+  --name my-app \
+  --auto true \
+  --min 1 \
+  --max 3 \
+  --cpu 60
+```
+
+### Allow full scale-to-zero with memory-based autoscaling
+
+Applications that can tolerate occasional cold starts can set `--min 0` to eliminate idle costs entirely while still scaling out automatically under memory pressure.
+
+```bash
+mikrom app scale \
+  --name my-app \
+  --auto true \
+  --min 0 \
+  --max 2 \
+  --mem 75
+```
+
+### Temporarily pin replicas during a deployment window
+
+During a critical deployment or maintenance window you may want to freeze the replica count and prevent autoscaling from interfering.
+
+```bash
+# Pin to 2 replicas (disables autoscaling)
+mikrom app scale --name my-app --replicas 2
+
+# Restore autoscaling after the window
+mikrom app scale --name my-app --auto true --min 1 --max 3 --cpu 70 --mem 80
+```
+
+### Stop all instances
+
+```bash
+mikrom app scale --name my-app --replicas 0
+```
+
+<Tip>
+  Use `mikrom app list` to check the current replica count and scaling mode for all your applications. Combine with `mikrom app deployments --name <name>` to correlate scaling events with specific deployment versions.
+</Tip>

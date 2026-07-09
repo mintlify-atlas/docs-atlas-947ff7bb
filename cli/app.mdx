@@ -1,0 +1,286 @@
+---
+title: "mikrom app: Application Lifecycle Management Commands"
+sidebarTitle: "app"
+description: "Create, deploy, scale, and manage applications on Mikrom with mikrom app. Control microVM resources, hypervisor selection, rollbacks, and autoscaling from the CLI."
+---
+
+The `mikrom app` command group is the primary interface for managing containerised workloads on the Mikrom edge platform. From creating an application from a Git repository and triggering builds, to rolling back to a previous deployment and fine-tuning autoscaling thresholds, every stage of an application's lifecycle is accessible through these subcommands. Mikrom builds your application inside an OCI image, schedules it on a worker node, and boots it inside a Firecracker or Cloud Hypervisor microVM depending on your choice of hypervisor.
+
+---
+
+## mikrom app list
+
+Lists every application registered in the current project.
+
+```bash
+mikrom app list
+```
+
+**Example**
+
+```bash
+mikrom app list
+```
+
+**Example output**
+
+```
+NAME        GIT URL                                         CREATED
+my-app      https://github.com/alice/my-app.git             2024-11-01
+api-server  https://github.com/alice/api-server.git         2024-12-15
+```
+
+---
+
+## mikrom app create
+
+Creates a new application record linked to a Git repository. Mikrom watches the repository for pushes and can trigger automatic deployments via a GitHub webhook (see `mikrom app secret`).
+
+```bash
+mikrom app create --name <name> --git-url <url>
+```
+
+**Example**
+
+```bash
+mikrom app create --name my-app --git-url https://github.com/alice/my-app.git
+```
+
+**Flags**
+
+<ParamField path="--name" type="string" required>
+  Unique name for the application within the current project. This name is used as the identifier in all other `mikrom app` subcommands.
+</ParamField>
+
+<ParamField path="--git-url" type="string" required>
+  HTTPS URL of the Git repository that contains the application source code. Mikrom's builder service clones this URL to produce an OCI image.
+</ParamField>
+
+---
+
+## mikrom app delete
+
+Permanently removes an application and all of its associated resources. Use `--yes` to skip the interactive confirmation prompt in automated scripts.
+
+```bash
+mikrom app delete --name <name> [--yes]
+```
+
+**Example**
+
+```bash
+mikrom app delete --name my-app
+```
+
+**Flags**
+
+<ParamField path="--name" type="string" required>
+  Name of the application to delete.
+</ParamField>
+
+<ParamField path="--yes" type="boolean">
+  Skip the interactive confirmation prompt. Useful for CI/CD scripts.
+</ParamField>
+
+<Warning>
+  Deleting an application is irreversible. All deployment history, secrets, and scaling configuration for the application are permanently removed.
+</Warning>
+
+---
+
+## mikrom app deploy
+
+Triggers a new build and deployment for an application. Mikrom clones the repository, builds an OCI image via the builder service, schedules the workload, and boots it in a microVM with the requested resources.
+
+```bash
+mikrom app deploy --name <name> [--cpu 1-4] [--memory 512M|1G|2G|4G] [--hypervisor firecracker|cloud-hypervisor|unspecified]
+```
+
+**Example — default resources**
+
+```bash
+mikrom app deploy --name my-app
+```
+
+**Example — custom resources**
+
+```bash
+mikrom app deploy --name my-app --cpu 2 --memory 1G --hypervisor firecracker
+```
+
+**Flags**
+
+<ParamField path="--name" type="string" required>
+  Name of the application to deploy.
+</ParamField>
+
+<ParamField path="--cpu" type="integer" default="1">
+  Number of vCPU cores to allocate to the microVM. Accepted values: `1`, `2`, `3`, `4`.
+</ParamField>
+
+<ParamField path="--memory" type="string" default="512M">
+  Amount of memory to allocate. Accepted values: `512M`, `1G`, `2G`, `4G`. The value is parsed by the CLI's `parse_memory_choice` function and converted to MiB internally.
+</ParamField>
+
+<ParamField path="--hypervisor" type="string" default="unspecified">
+  Hypervisor backend for the microVM. Accepted values:
+
+  | Value | Description |
+  |---|---|
+  | `firecracker` | Use the Firecracker VMM (optimised for fast cold-start) |
+  | `cloud-hypervisor` | Use Cloud Hypervisor (richer device model) |
+  | `unspecified` | Let the scheduler choose the best available backend |
+</ParamField>
+
+<Info>
+  The default resource preset is `1` vCPU and `512M` RAM, matching the presets available in the Mikrom dashboard.
+</Info>
+
+---
+
+## mikrom app activate
+
+Activates a previously built deployment, effectively performing a rollback or promotion. The specified deployment must already exist in the application's deployment history.
+
+```bash
+mikrom app activate --app <name> --deployment-id <id>
+```
+
+**Example**
+
+```bash
+mikrom app activate --app my-app --deployment-id dep_01j9k2m3n4p5q6r7
+```
+
+**Flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application.
+</ParamField>
+
+<ParamField path="--deployment-id" type="string" required>
+  The ID of the deployment to activate. Retrieve available deployment IDs with `mikrom app deployments --name <name>`.
+</ParamField>
+
+---
+
+## mikrom app deployments
+
+Lists the full deployment history for an application, including deployment IDs, statuses, and timestamps. Use the IDs shown here with `mikrom app activate` to roll back.
+
+```bash
+mikrom app deployments --name <name>
+```
+
+**Example**
+
+```bash
+mikrom app deployments --name my-app
+```
+
+**Example output**
+
+```
+ID                       STATUS     CREATED
+dep_01j9k2m3n4p5q6r7     active     2024-12-20 10:05:01
+dep_01j8h1l2k3m4n5o6     inactive   2024-12-18 14:22:33
+dep_01j7g0k1j2l3m4n5     inactive   2024-12-15 09:10:55
+```
+
+**Flags**
+
+<ParamField path="--name" type="string" required>
+  Name of the application whose deployment history you want to view.
+</ParamField>
+
+---
+
+## mikrom app secret
+
+Displays the GitHub webhook secret for the application. Configure this value in your GitHub repository's webhook settings to enable automated deployments on every push.
+
+```bash
+mikrom app secret --name <name>
+```
+
+**Example**
+
+```bash
+mikrom app secret --name my-app
+```
+
+**Flags**
+
+<ParamField path="--name" type="string" required>
+  Name of the application whose webhook secret you want to retrieve.
+</ParamField>
+
+<Note>
+  Treat this secret like a password. Anyone who holds it can trigger deployments for your application. Rotate it by deleting and recreating the application if it is ever exposed.
+</Note>
+
+---
+
+## mikrom app scale
+
+Configures the scaling behaviour for an application. Mikrom supports both fixed replica counts and policy-driven autoscaling based on CPU and memory thresholds.
+
+```bash
+mikrom app scale --name <name> [--replicas 0-3] [--auto true|false] [--min 0-3] [--max 1-3] [--cpu <threshold%>] [--mem <threshold%>]
+```
+
+**Example — set fixed replicas**
+
+```bash
+mikrom app scale --name my-app --replicas 2
+```
+
+**Example — configure autoscaling**
+
+```bash
+mikrom app scale --name my-app --auto true --min 1 --max 3 --cpu 70 --mem 80
+```
+
+**Example — disable autoscaling and go back to fixed replicas**
+
+```bash
+mikrom app scale --name my-app --replicas 1
+```
+
+**Flags**
+
+<ParamField path="--name" type="string" required>
+  Name of the application to configure.
+</ParamField>
+
+<ParamField path="--replicas" type="integer">
+  Desired fixed replica count (`0`–`3`). Setting this flag **disables autoscaling** for the application and pins the instance count to the specified value.
+</ParamField>
+
+<ParamField path="--auto" type="boolean">
+  Enable (`true`) or disable (`false`) autoscaling. When enabled, the scheduler adjusts the replica count automatically based on `--cpu` and `--mem` thresholds.
+</ParamField>
+
+<ParamField path="--min" type="integer">
+  Minimum number of replicas for the autoscaler (`0`–`3`). The scheduler will not scale below this value.
+</ParamField>
+
+<ParamField path="--max" type="integer">
+  Maximum number of replicas for the autoscaler (`1`–`3`). The scheduler will not scale above this value.
+</ParamField>
+
+<ParamField path="--cpu" type="float">
+  CPU utilisation threshold (as a percentage) that triggers a scale-out event when exceeded.
+</ParamField>
+
+<ParamField path="--mem" type="float">
+  Memory utilisation threshold (as a percentage) that triggers a scale-out event when exceeded.
+</ParamField>
+
+<Note>
+  All Mikrom applications automatically scale to zero after a period of inactivity, regardless of the configured minimum replica count. The first request after a scale-to-zero event cold-starts a new microVM.
+</Note>
+
+<Warning>
+  Setting `--replicas` overrides and disables autoscaling. To re-enable autoscaling after using `--replicas`, run `mikrom app scale` again with `--auto true` and the desired `--min` / `--max` bounds.
+</Warning>

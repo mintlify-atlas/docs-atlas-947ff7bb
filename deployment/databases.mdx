@@ -1,0 +1,155 @@
+---
+title: "Managing PostgreSQL Databases with Neon"
+sidebarTitle: "Databases"
+description: "Provision and manage Neon-backed PostgreSQL databases on Mikrom, with connection tunnels, branching, snapshots, and backup visibility via the CLI."
+---
+
+Mikrom provisions PostgreSQL databases through Neon and runs them inside Cloud Hypervisor-backed microVMs on the platform. Each database gets its own isolated microVM boundary, giving you dedicated compute and memory rather than a shared multi-tenant pool. The control plane stores the PostgreSQL major version alongside every database record and exposes it through list, detail, and create responses so your tooling always has accurate version metadata.
+
+## Creating a Database
+
+Use `mikrom db create` to provision a new PostgreSQL instance. The only required argument is a unique name; all other flags have defaults.
+
+```bash
+mikrom db create orders
+```
+
+To customise resources at creation time, pass any combination of the optional flags:
+
+```bash
+mikrom db create orders \
+  --engine neon \
+  --version 16 \
+  --vcpus 2 \
+  --memory 1G \
+  --disk 2048
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--engine` | `neon` | Database engine (currently `neon`) |
+| `--version` | `16` | PostgreSQL major version |
+| `--vcpus` | `1` | CPU cores allocated to the database VM (1–4) |
+| `--memory` | `512M` | Memory allocated (512M, 1G, 2G, or 4G) |
+| `--disk` | `1024` | Disk size in MiB |
+
+<Note>
+  The `--memory` and `--disk` flags both accept **integer MiB values**. `512M`, `1G`, `2G`, and `4G` are the valid memory presets (the CLI converts them to MiB internally). The `--disk` flag takes a raw MiB integer — for example, `--disk 2048` provisions a 2 GiB disk.
+</Note>
+
+## Listing Databases
+
+```bash
+mikrom db list
+```
+
+This returns all databases in your active project, including their IDs, names, engine, PostgreSQL version, and current status.
+
+## Inspecting a Database
+
+```bash
+mikrom db info <id>
+```
+
+Returns the full metadata record for a single database, including resource allocation, version, provisioning status, and the Neon instance identifiers needed for advanced operations.
+
+## Connecting to a Database
+
+Mikrom routes database traffic through an SSH tunnel into the microVM rather than exposing a public PostgreSQL port. The `connection` command prints everything you need to establish that tunnel.
+
+```bash
+mikrom db connection <id>
+```
+
+Example output:
+
+```
+SSH Tunnel:
+  ssh -L 5432:localhost:5432 mikrom@<vm-ip> -i ~/.ssh/mikrom_key -N
+
+psql Command (through tunnel):
+  psql "host=localhost port=5432 dbname=orders user=mikrom"
+```
+
+To retrieve the same information as structured data for scripting:
+
+```bash
+mikrom db connection <id> --output json
+```
+
+```json
+{
+  "ssh_tunnel": "ssh -L 5432:localhost:5432 mikrom@<vm-ip> -i ~/.ssh/mikrom_key -N",
+  "psql": "psql \"host=localhost port=5432 dbname=orders user=mikrom\"",
+  "host": "localhost",
+  "port": 5432,
+  "dbname": "orders",
+  "user": "mikrom"
+}
+```
+
+<Tip>
+  Run the SSH tunnel command in a background terminal (or with `&`), then use the `psql` command in a second terminal. The tunnel stays active for the duration of your session.
+</Tip>
+
+## Branches
+
+Neon's branching model lets you create instant copy-on-write clones of your database for development, staging, or experimentation without duplicating storage.
+
+```bash
+mikrom db branches <id>
+```
+
+Returns all branches associated with the database, including branch IDs, names, and parent references.
+
+## Backup Details
+
+```bash
+mikrom db backup <id>
+```
+
+Displays the backup configuration and latest backup metadata for the database, including retention policy and the timestamp of the most recent successful backup.
+
+## Snapshots
+
+Snapshots are point-in-time captures of the database VM state. They complement Neon's built-in branching and are useful for pre-migration checkpoints or before destructive schema changes.
+
+### List snapshots
+
+```bash
+mikrom db snapshots <id>
+```
+
+### Create a snapshot
+
+```bash
+mikrom db snapshot-create <id> pre-migration-v2
+```
+
+### Restore from a snapshot
+
+```bash
+mikrom db snapshot-restore <id> pre-migration-v2
+```
+
+<Warning>
+  Restoring a snapshot replaces the current database state entirely. Any writes made after the snapshot was created will be lost. Consider creating a new branch via Neon before restoring if you want to preserve recent data.
+</Warning>
+
+### Delete a snapshot
+
+```bash
+mikrom db snapshot-delete <id> pre-migration-v2
+```
+
+## Deleting a Database
+
+```bash
+mikrom db delete <id>
+```
+
+You will be prompted for confirmation. Pass `--yes` to skip the prompt in automated scripts.
+
+<Warning>
+  Deleting a database permanently destroys the microVM, all Neon data, and all snapshots associated with that instance. There is no recovery path after deletion.
+</Warning>

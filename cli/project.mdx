@@ -1,0 +1,144 @@
+---
+title: "mikrom project: Multi-Project Context and Team Management"
+sidebarTitle: "project"
+description: "Manage Mikrom projects and switch CLI context between tenants. Each project is identified by a unique 6-character tenant ID slug for isolation."
+---
+
+Mikrom is a multi-tenant platform where resources — applications, databases, volumes, and access tokens — are scoped to a **project**. Every project has a unique six-character tenant ID slug (e.g. `abc123`) that identifies it across the platform. The `mikrom project` commands let you list the projects your account has access to, create new projects, and switch the active project context so that subsequent CLI commands operate against the correct tenant.
+
+## Understanding Projects
+
+When you authenticate with `mikrom auth login`, your session is associated with one active project at a time. That active project context is stored in the CLI configuration and is used as the default tenant for every command you run — from deploying apps to creating databases. You can switch the active project at any time without re-authenticating.
+
+<Note>
+  The `tenant-id` used by `mikrom project switch` is a **6-character slug** (letters and digits), not a full UUID. You can find your project's tenant ID in `mikrom project list` output.
+</Note>
+
+---
+
+## mikrom project list
+
+List all projects your account has access to, including their names and tenant ID slugs.
+
+```bash
+mikrom project list
+```
+
+**Example output**
+
+```
+TENANT ID   NAME
+abc123      personal
+def456      acme-corp
+```
+
+---
+
+## mikrom project create
+
+Create a new project under your account. After creation, use `mikrom project switch` to activate it as your working context.
+
+```bash
+mikrom project create --name <name>
+```
+
+<ParamField query="--name" type="string" required>
+  Display name for the new project (e.g. `acme-production`).
+</ParamField>
+
+**Example**
+
+```bash
+mikrom project create --name acme-production
+```
+
+**Example output**
+
+```
+Project created.
+  Name:      acme-production
+  Tenant ID: ghi789
+```
+
+---
+
+## mikrom project switch
+
+Switch the active CLI context to a different project. After switching, all subsequent commands will target that project until you switch again.
+
+```bash
+mikrom project switch <tenant-id>
+```
+
+<ParamField path="tenant-id" type="string" required>
+  The 6-character slug of the project to activate (visible in `mikrom project list`).
+</ParamField>
+
+**Example**
+
+```bash
+mikrom project switch def456
+```
+
+### Equivalent: mikrom config set
+
+You can achieve the same context switch using `mikrom config set` directly, which writes the `active-project` key to the CLI configuration file:
+
+```bash
+mikrom config set active-project def456
+```
+
+Both commands are equivalent — `mikrom project switch` is a convenience wrapper around the config setter. Use whichever fits your workflow.
+
+<Tabs>
+  <Tab title="mikrom project switch">
+    ```bash
+    # Switch to the acme-corp project
+    mikrom project switch def456
+
+    # Verify the active project
+    mikrom config show
+    ```
+  </Tab>
+  <Tab title="mikrom config set">
+    ```bash
+    # Equivalent: set the active project via config
+    mikrom config set active-project def456
+
+    # Verify the active project
+    mikrom config show
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Typical Workflow
+
+<Steps>
+  <Step title="List your projects">
+    ```bash
+    mikrom project list
+    ```
+    Note the tenant ID of the project you want to work in.
+  </Step>
+  <Step title="Switch context">
+    ```bash
+    mikrom project switch def456
+    ```
+    Your CLI is now scoped to the `acme-corp` project.
+  </Step>
+  <Step title="Verify the active context">
+    ```bash
+    mikrom config show
+    ```
+    Confirm that `active-project` shows the expected tenant ID.
+  </Step>
+  <Step title="Deploy or manage resources">
+    ```bash
+    mikrom app list
+    mikrom db list
+    ```
+    All commands now operate within the `acme-corp` project.
+  </Step>
+</Steps>

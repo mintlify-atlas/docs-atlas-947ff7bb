@@ -1,72 +1,98 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Mikrom",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#040404"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
+  "favicon": "https://media.brand.dev/d5ac4325-b32e-43c9-99bb-a39d1b0314f1.svg",
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/mikronita/mikrom"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/mikronita/mikrom"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/apps",
+              "deployment/databases",
+              "deployment/volumes",
+              "deployment/scaling"
+            ]
+          },
+          {
+            "group": "Platform Services",
+            "pages": [
+              "services/router",
+              "services/networking",
+              "services/dns",
+              "services/agent",
+              "services/builder",
+              "services/scheduler"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/api",
+              "configuration/agent",
+              "configuration/observability"
+            ]
+          },
+          {
+            "group": "Development & CI",
+            "pages": [
+              "development/local-setup",
+              "development/ci-profiles",
+              "development/testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "cli/overview",
+              "cli/configuration"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/auth",
+              "cli/app",
+              "cli/deployment",
+              "cli/db",
+              "cli/volume",
+              "cli/project",
+              "cli/pat",
+              "cli/system"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

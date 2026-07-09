@@ -1,0 +1,125 @@
+---
+title: "mikrom auth: Authentication and User Profile Commands"
+sidebarTitle: "auth"
+description: "Manage authentication and user profile with mikrom auth. Login, register, view your profile, and update account details from the command line."
+---
+
+The `mikrom auth` command group handles everything related to your Mikrom account — from initial registration and daily login, to inspecting your current session and keeping your profile up to date. After a successful login the CLI writes your session token to `~/.config/mikrom/` and automatically attaches it to every subsequent request.
+
+## mikrom auth login
+
+Authenticates with the Mikrom API using your email and password, then stores the returned session token in the CLI config file so all future commands are automatically authorised.
+
+```bash
+mikrom auth login --email <email> --password <password>
+```
+
+**Example**
+
+```bash
+mikrom auth login --email alice@example.com --password s3cr3t!
+```
+
+**Flags**
+
+<ParamField path="--email" type="string" required>
+  The email address associated with your Mikrom account.
+</ParamField>
+
+<ParamField path="--password" type="string" required>
+  Your account password. Consider wrapping the value in single quotes if it contains special shell characters.
+</ParamField>
+
+<Note>
+  The session token is written to `~/.config/mikrom/` and reused by every subsequent CLI command. Run `mikrom auth whoami` to confirm the stored session is valid.
+</Note>
+
+---
+
+## mikrom auth register
+
+Creates a new Mikrom account with the provided email address and password.
+
+```bash
+mikrom auth register --email <email> --password <password>
+```
+
+**Example**
+
+```bash
+mikrom auth register --email alice@example.com --password s3cr3t!
+```
+
+**Flags**
+
+<ParamField path="--email" type="string" required>
+  The email address you want to register. Must be unique across all Mikrom accounts.
+</ParamField>
+
+<ParamField path="--password" type="string" required>
+  The password for your new account.
+</ParamField>
+
+<Info>
+  After registration completes you can immediately log in with `mikrom auth login` using the same credentials.
+</Info>
+
+---
+
+## mikrom auth whoami
+
+Displays the profile of the currently authenticated user by reading the session token stored in the CLI config file and querying the Mikrom API.
+
+```bash
+mikrom auth whoami
+```
+
+**Example**
+
+```bash
+mikrom auth whoami
+```
+
+**Example output**
+
+```
+Email:      alice@example.com
+First name: Alice
+Last name:  Smith
+```
+
+<Note>
+  If no valid session token is found, the command returns an authentication error. Run `mikrom auth login` first.
+</Note>
+
+---
+
+## mikrom auth update
+
+Updates one or both display-name fields on your Mikrom account. All flags are optional — supply only the fields you want to change.
+
+```bash
+mikrom auth update [--first-name <name>] [--last-name <name>]
+```
+
+**Example — update both names**
+
+```bash
+mikrom auth update --first-name Alice --last-name Smith
+```
+
+**Example — update first name only**
+
+```bash
+mikrom auth update --first-name Alice
+```
+
+**Flags**
+
+<ParamField path="--first-name" type="string">
+  New first name to set on your account. Omit this flag to leave the current value unchanged.
+</ParamField>
+
+<ParamField path="--last-name" type="string">
+  New last name to set on your account. Omit this flag to leave the current value unchanged.
+</ParamField>

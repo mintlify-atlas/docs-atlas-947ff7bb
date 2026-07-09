@@ -1,0 +1,242 @@
+---
+title: "mikrom CLI: Command Reference Overview and Installation"
+sidebarTitle: "Overview"
+description: "Complete reference for the mikrom CLI — a Rust-built binary with subcommands for apps, deployments, databases, volumes, auth, and more."
+---
+
+The `mikrom` CLI is a Rust-built binary compiled from the `mikrom-cli` crate and powered by [clap](https://docs.rs/clap). It is the primary operator interface for the Mikrom edge platform, letting you manage applications, live deployments, databases, persistent volumes, projects, personal access tokens, and platform notifications entirely from a terminal. Every command is organized into a named subcommand group so you can discover available operations with `--help` at any level of the hierarchy.
+
+## Installation
+
+Install the `mikrom` binary from the workspace root using the `install-cli` Makefile target, which runs `cargo install` against the `mikrom-cli` crate and places the binary in `~/.cargo/bin`:
+
+```bash
+make install-cli
+```
+
+Verify the installation succeeded and confirm the active version:
+
+```bash
+mikrom --version
+```
+
+## Shell Completions
+
+The `mikrom completion` subcommand generates shell completion scripts for your preferred shell. Pipe the output into the appropriate file for your environment.
+
+```bash
+# Bash — add to ~/.bash_completion.d or source directly
+mikrom completion bash > ~/.bash_completion.d/mikrom
+
+# Zsh
+mikrom completion zsh > "${fpath[1]}/_mikrom"
+
+# Fish
+mikrom completion fish > ~/.config/fish/completions/mikrom.fish
+
+# PowerShell
+mikrom completion powershell | Out-String | Invoke-Expression
+```
+
+Supported shells come directly from [`clap_complete::Shell`](https://docs.rs/clap_complete): `bash`, `zsh`, `fish`, `elvish`, and `powershell`.
+
+## Global Options
+
+These flags are available on every command and subcommand:
+
+| Flag | Short | Description |
+|---|---|---|
+| `--output <format>` | `-o` | Output format: `table` (default) or `json` |
+| `--verbose` | `-v` | Increase log verbosity; repeat for more detail (`-v`, `-vv`, `-vvv`) |
+| `--no-color` | — | Disable colored output (also honoured via `NO_COLOR` env var) |
+| `--help` | `-h` | Print help for the current command |
+| `--version` | `-V` | Print binary version |
+
+<Note>
+The `--output json` flag is useful for piping `mikrom` output into `jq` or other tooling. Not every command has machine-readable output, but all list and status commands support it.
+</Note>
+
+## Command Groups
+
+The CLI is structured around eleven top-level subcommand groups. Each group maps to a specific concern within the platform.
+
+| Command | Description |
+|---|---|
+| `mikrom auth` | Authentication and profile management |
+| `mikrom app` | Application lifecycle management |
+| `mikrom deployment` | Live microVM instance management (jobs) |
+| `mikrom config` | CLI configuration |
+| `mikrom volume` | Persistent storage management |
+| `mikrom db` | Database management (Neon-backed) |
+| `mikrom pat` | Personal Access Token management |
+| `mikrom notification` | Platform notification management |
+| `mikrom project` | Project and tenant management |
+| `mikrom system` | System status and health |
+| `mikrom completion` | Generate shell completion scripts |
+
+### `mikrom auth`
+
+Authenticate with the platform and manage your user profile.
+
+| Subcommand | Description |
+|---|---|
+| `auth login` | Login with `--email` and `--password` |
+| `auth register` | Register a new account |
+| `auth whoami` | Display the currently authenticated user profile |
+| `auth update` | Update profile details (`--first-name`, `--last-name`) |
+
+### `mikrom app`
+
+Create and manage applications. Each app is backed by a Git repository and deployed into microVMs.
+
+| Subcommand | Description |
+|---|---|
+| `app list` | List all applications in the active project |
+| `app create` | Create a new app (`--name`, `--git-url`) |
+| `app delete` | Delete an application (`--name`, `--yes` to skip prompt) |
+| `app deploy` | Trigger a new deployment build (`--name`, `--cpu`, `--memory`, `--hypervisor`) |
+| `app activate` | Activate or roll back to a specific deployment version |
+| `app deployments` | List deployment history for an application |
+| `app secret` | Show the GitHub webhook secret for an application |
+| `app scale` | Configure fixed replicas or autoscaling thresholds |
+
+Resource options for `app deploy`:
+
+- `--cpu`: `1`, `2`, `3`, or `4` cores (default: `1`)
+- `--memory` / `-m`: `512M`, `1G`, `2G`, or `4G` (default: `512M`)
+- `--hypervisor` / `-H`: `firecracker`, `cloud-hypervisor`, or `unspecified`
+
+### `mikrom deployment`
+
+Interact with live deployment instances (referred to as jobs). Each job is a running microVM for an application version.
+
+| Subcommand | Description |
+|---|---|
+| `deployment list` | List all active deployments across all apps |
+| `deployment status` | Get detailed status of a specific job (`--app`, `--job-id`) |
+| `deployment stop` | Stop and kill a running instance |
+| `deployment pause` | Suspend CPU for a running instance |
+| `deployment resume` | Resume a paused instance |
+| `deployment delete` | Remove a deployment record from history |
+| `deployment snapshots` | List VM snapshots for a deployment |
+| `deployment snapshot-create` | Create a new VM snapshot |
+| `deployment snapshot-restore` | Restore a VM to a named snapshot |
+| `deployment snapshot-delete` | Delete a named VM snapshot |
+
+### `mikrom config`
+
+Read and write CLI configuration. See the [Configuration](/cli/configuration) page for full details.
+
+| Subcommand | Description |
+|---|---|
+| `config show` | Display the current configuration |
+| `config set <key> <value>` | Set a configuration value |
+
+### `mikrom volume`
+
+Manage persistent volumes that can be attached to application microVMs.
+
+| Subcommand | Description |
+|---|---|
+| `volume list` | List volumes, optionally filtered by `--app` |
+| `volume create` | Create a new volume (`--name`, `--size` in MiB) |
+| `volume attach` | Attach a volume to an app (`--app`, `--volume-id`, `--mount`, `--mode`) |
+| `volume detach` | Detach a volume from an app |
+| `volume snapshot` | Create a snapshot of a volume |
+| `volume restore` | Restore a volume to a named snapshot |
+| `volume snapshots list` | List snapshots for a volume |
+| `volume snapshots delete` | Delete a specific snapshot |
+| `volume delete` | Permanently delete a volume |
+
+Access modes for `volume attach --mode`:
+
+- `0` — ReadWriteOnce (RWO)
+- `1` — ReadWriteMany (RWX)
+- `2` — ReadOnlyMany (ROX)
+
+### `mikrom db`
+
+Provision and manage Neon-backed PostgreSQL databases running in Cloud Hypervisor microVMs.
+
+| Subcommand | Description |
+|---|---|
+| `db list` | List all databases in the active project |
+| `db create <name>` | Create a database (engine, version, vCPUs, memory, disk) |
+| `db delete <id>` | Delete a database |
+| `db info <id>` | Show database details |
+| `db connection <id>` | Show SSH tunnel and `psql` connection details |
+| `db branches <id>` | List Neon branches for a database |
+| `db backup <id>` | Show backup details |
+| `db snapshots <id>` | List snapshots |
+| `db snapshot-create <id> <name>` | Create a database snapshot |
+| `db snapshot-restore <id> <snapshot>` | Restore to a named snapshot |
+| `db snapshot-delete <id> <snapshot>` | Delete a named snapshot |
+
+Default values for `db create`: engine `neon`, PostgreSQL version `16`, `1` vCPU, `512M` RAM, `1024` MiB disk.
+
+### `mikrom pat`
+
+Create and manage Personal Access Tokens for use in automation and CI/CD pipelines.
+
+| Subcommand | Description |
+|---|---|
+| `pat list` | List all PATs |
+| `pat create <name>` | Create a new PAT with a descriptive name |
+| `pat revoke <id>` | Revoke a PAT by ID (`--yes` to skip confirmation) |
+
+### `mikrom notification`
+
+Manage platform notifications for your account.
+
+| Subcommand | Description |
+|---|---|
+| `notification list` | List notifications (`--unread-only`, `--limit`, `--offset`) |
+| `notification read <id>` | Mark a specific notification as read |
+| `notification read-all` | Mark all notifications as read |
+
+### `mikrom project`
+
+Switch between projects (tenants) and list or create projects.
+
+| Subcommand | Description |
+|---|---|
+| `project list` | List all projects you have access to |
+| `project create` | Create a new project (`--name`) |
+| `project switch <tenant-id>` | Switch the CLI context to a different project (6-char slug) |
+
+### `mikrom system`
+
+Inspect the health of platform services.
+
+| Subcommand | Description |
+|---|---|
+| `system health` | Check the health of all system services |
+
+## Quick Reference
+
+<CardGroup cols={2}>
+  <Card title="Auth" href="/cli/auth" icon="key">
+    Login, register, and manage your user profile
+  </Card>
+  <Card title="App" href="/cli/app" icon="box">
+    Create, deploy, scale, and delete applications
+  </Card>
+  <Card title="Deployment" href="/cli/deployment" icon="circle-play">
+    Inspect and control live microVM job instances
+  </Card>
+  <Card title="Database" href="/cli/db" icon="database">
+    Provision and connect to Neon-backed PostgreSQL databases
+  </Card>
+  <Card title="Volume" href="/cli/volume" icon="hard-drive">
+    Manage persistent volumes and snapshots
+  </Card>
+  <Card title="Project" href="/cli/project" icon="folder">
+    Switch between project tenants and create new ones
+  </Card>
+  <Card title="PAT" href="/cli/pat" icon="shield">
+    Create and revoke Personal Access Tokens
+  </Card>
+  <Card title="System" href="/cli/system" icon="activity">
+    Check platform service health
+  </Card>
+</CardGroup>

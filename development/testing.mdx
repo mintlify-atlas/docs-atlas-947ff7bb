@@ -1,0 +1,228 @@
+---
+title: "Running Mikrom Tests: Unit, Integration, and E2E"
+sidebarTitle: "Testing"
+description: "Run Mikrom's unit, integration, and end-to-end test suites for Rust services and the SvelteKit frontend, including database helpers and opt-in suites."
+---
+
+Mikrom ships three categories of tests — Rust unit tests, Rust integration tests, and SvelteKit frontend tests — plus optional opt-in suites for NATS, PostgreSQL, and Ceph integration scenarios. All Rust test targets use `cargo-nextest` for parallelism and structured output. The sections below describe how to run each category and what infrastructure each one requires.
+
+<Note>
+Integration tests start Docker containers for Postgres and NATS automatically when you run `make test-integration`. Make sure Docker is running and ports `5432` and `4223` are free before invoking that target.
+</Note>
+
+## Make Targets
+
+| Target | What it runs | Infrastructure needed |
+|---|---|---|
+| `make test` | Unit tests across all workspace crates (`--lib`) | None |
+| `make test-integration` | Integration tests for `mikrom-api` (auth and app lifecycle) | Docker (Postgres + NATS test container) |
+| `make test-all` | All unit tests + all integration tests | Docker |
+| `make test-verbose` | Unit tests with `--nocapture` output | None |
+| `make test-one NAME=<test>` | Single test by name | None |
+| `make test-cli` | `mikrom-cli` unit tests only | None |
+| `make test-coverage` | Full suite with LLVM coverage report (requires `cargo-llvm-cov`) | None |
+
+## Running the Full Test Suite
+
+<Steps>
+  <Step title="Install cargo-nextest">
+    All `make test*` targets require `cargo-nextest`. Install it once:
+
+    ```bash
+    cargo binstall cargo-nextest
+    # or
+    cargo install cargo-nextest
+    ```
+  </Step>
+
+  <Step title="Start Docker (for integration tests)">
+    Make sure Docker is running. The integration test target manages the container lifecycle automatically, but Docker itself must be available:
+
+    ```bash
+    docker info
+    ```
+  </Step>
+
+  <Step title="Run unit tests">
+    ```bash
+    make test
+    ```
+
+    This runs `cargo nextest run --lib` across the entire workspace. No database, no NATS, no Docker required.
+  </Step>
+
+  <Step title="Run integration tests">
+    ```bash
+    make test-integration
+    ```
+
+    This brings up `postgres` and `nats-test` from the `test` Docker Compose profile, then runs the `integration_auth_tests` and `integration_app_lifecycle_tests` test binaries in `mikrom-api` with `TEST_NATS_URL=nats://localhost:4223`.
+  </Step>
+
+  <Step title="Run the complete suite">
+    ```bash
+    make test-all
+    ```
+
+    Combines `test-all-crates` (unit tests for every workspace crate with Ceph libs and protoc available) and `test-integration`.
+  </Step>
+</Steps>
+
+## Rust Tests vs Frontend Tests
+
+<Tabs>
+  <Tab title="Rust Tests">
+    ### Unit tests
+
+    Run all library unit tests without any external services:
+
+    ```bash
+    make test
+    ```
+
+    To run a single named test:
+
+    ```bash
+    make test-one NAME=test_score_idle
+    ```
+
+    To run tests for a specific crate:
+
+    ```bash
+    make test-cli       # mikrom-cli only
+    ```
+
+    ### Integration tests
+
+    Integration tests for `mikrom-api` require a live Postgres database and a NATS instance. The Makefile starts both automatically using the `test` Docker Compose profile:
+
+    ```bash
+    make test-integration
+    ```
+
+    The `nats-test` service runs on port `4223` (mapped from NATS internal port `4222`) so it does not conflict with the development NATS instance on `4222`.
+
+    ### Opt-in NATS and PostgreSQL suites
+
+    Some integration tests are annotated `#[ignore]` and skipped in the standard runs. Enable them through the Dagger-backed `ci-external-tests` profile:
+
+    ```bash
+    MIKROM_RUN_NATS_TESTS=1 make ci-external-tests
+    ```
+
+    ### Ceph integration tests
+
+    Agent RBD tests require a live Ceph cluster and are permanently ignored unless you explicitly opt in:
+
+    ```bash
+    MIKROM_RUN_CEPH_TESTS=1 make ci-ceph-tests
+    ```
+
+    See [CI Profiles](/development/ci-profiles) for the host requirements.
+  </Tab>
+
+  <Tab title="Frontend Tests">
+    All frontend test commands run from the `mikrom-app/` directory. Use the Makefile wrappers or call `pnpm` directly from inside that directory.
+
+    ### Unit tests (Vitest)
+
+    ```bash
+    # via Makefile
+    make app-test-unit
+
+    # or directly
+    cd mikrom-app && pnpm test:unit
+    ```
+
+    Vitest runs in a single pass without a browser. No backend services required.
+
+    ### Unit tests in watch mode
+
+    ```bash
+    make app-test-watch
+    # or
+    cd mikrom-app && pnpm test:watch
+    ```
+
+    ### Coverage report
+
+    ```bash
+    make app-test-coverage
+    # or
+    cd mikrom-app && pnpm test:coverage
+    ```
+
+    ### End-to-end tests (Playwright)
+
+    ```bash
+    make app-test-e2e
+    # or
+    cd mikrom-app && pnpm test:e2e
+    ```
+
+    Playwright tests require a running instance of the full stack (API, NATS, Postgres). Start infrastructure first with `make up` or `make up-full`, then launch the SvelteKit dev server with `make run-app` before running e2e tests.
+  </Tab>
+</Tabs>
+
+## API Test Database (`TestDb`)
+
+`mikrom-api` repository tests and some handler tests use the `TestDb` helper defined in `src/test_utils.rs`. The helper:
+
+1. Creates an isolated ephemeral database named with a unique suffix per test binary.
+2. Runs all SQLx migrations against that database.
+3. Drops the database on teardown so tests do not accumulate state.
+
+**Default connection string** (used when `TEST_DATABASE_URL` is not set):
+
+```
+postgres://mikrom:mikrom_password@localhost:5432/mikrom_api_test
+```
+
+**Override with an environment variable:**
+
+```bash
+TEST_DATABASE_URL=postgres://mikrom:mikrom_password@localhost:5432/my_test_db \
+  cargo nextest run -p mikrom-api --features test-utils
+```
+
+<Warning>
+`TestDb` rejects any database name that does not end in `_test`. This guard prevents accidental migrations against production or development databases. If `TEST_DATABASE_URL` points to a URL whose database name does not end in `_test`, the helper will panic and the test binary will fail immediately.
+</Warning>
+
+The Postgres 17 container defined in `docker-compose.yml` uses credentials `mikrom` / `mikrom_password` and exposes port `5432`, which matches the default `TEST_DATABASE_URL` exactly.
+
+## eBPF Validation
+
+The eBPF program in `mikrom-agent-ebpf` is validated as part of `make ci-full`. No separate make target exists for eBPF-only validation — it is included in the release build step that `ci-full` runs after `ci-fast`. See [CI Profiles](/development/ci-profiles) for details.
+
+## NAT64/DNS64 Smoke Validation
+
+Host and VM-level NAT64/DNS64 connectivity is validated through a manual checklist rather than an automated test suite. The checklist lives at `docs/nat64-dns64-smoke-checklist.md` in the repository and covers:
+
+- Host network namespace NAT64 forwarding rules
+- DNS64 resolver responses for workload hostnames
+- IPv4-mapped address reachability from inside a microVM
+
+Run through this checklist after changes to `mikrom-network`, `mikrom-dns`, or the microVM boot configuration.
+
+## Coverage Reports
+
+Generate an HTML coverage report for the full workspace using `cargo-llvm-cov`:
+
+```bash
+make test-coverage
+```
+
+The report is written to `target/llvm-cov/html/index.html`. Install the tool first if it is not present:
+
+```bash
+cargo install cargo-llvm-cov
+```
+
+For the frontend, use:
+
+```bash
+make app-test-coverage
+# or
+cd mikrom-app && pnpm test:coverage
+```

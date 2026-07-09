@@ -1,0 +1,182 @@
+---
+title: "Deploying Applications on Mikrom Edge Platform"
+sidebarTitle: "Applications"
+description: "Create, deploy, and manage applications on Mikrom using microVM isolation with Firecracker or Cloud Hypervisor, resource presets, and GitHub webhook integration."
+---
+
+Mikrom deploys applications directly from Git repositories into isolated microVMs running on either Firecracker or Cloud Hypervisor. The builder service automatically detects your project's stack — no configuration files required — and produces an OCI image that the scheduler then places onto available agent nodes. Every deployment gets its own microVM boundary, giving you strong workload isolation without sacrificing the fast startup times that make edge deployments practical.
+
+## Supported Stacks
+
+The Mikrom builder auto-detects the following stacks from your repository contents. You do not need to specify a framework — the builder identifies it from project files and applies the appropriate build strategy.
+
+<CardGroup cols={3}>
+  <Card title="Phoenix" icon="fire">
+    Elixir / Phoenix web applications
+  </Card>
+  <Card title="Ruby on Rails" icon="gem">
+    Rails applications with standard layouts
+  </Card>
+  <Card title="Django" icon="python">
+    Python Django web applications
+  </Card>
+  <Card title="Laravel" icon="php">
+    PHP Laravel applications
+  </Card>
+  <Card title="JavaScript" icon="js">
+    Node.js and JavaScript runtimes
+  </Card>
+  <Card title="Go" icon="golang">
+    Go module-based applications
+  </Card>
+  <Card title="Rust" icon="rust">
+    Cargo-based Rust applications
+  </Card>
+  <Card title="Docker" icon="docker">
+    Any repository with a Dockerfile
+  </Card>
+  <Card title="Static" icon="globe">
+    Static sites and single-page apps
+  </Card>
+</CardGroup>
+
+## Creating and Deploying an App
+
+<Steps>
+  <Step title="Create the application record">
+    Register your application with a unique name and a Git repository URL. Mikrom stores the repository reference and creates the application in your active project.
+
+    ```bash
+    mikrom app create --name my-app --git-url https://github.com/you/my-app.git
+    ```
+
+    | Flag | Description |
+    |------|-------------|
+    | `--name` | Unique name for this application |
+    | `--git-url` | HTTPS URL of the source Git repository |
+  </Step>
+
+  <Step title="Deploy the application">
+    Trigger a build and deployment. Mikrom clones the repository, auto-detects the stack, builds an OCI image, and schedules a microVM with the resources you choose.
+
+    ```bash
+    mikrom app deploy --name my-app --cpu 2 --memory 1G
+    ```
+
+    Resource flags are optional — defaults are **1 CPU** and **512 MB RAM**.
+  </Step>
+
+  <Step title="Verify the deployment">
+    List all applications to confirm the deployment is live and check its assigned hostname.
+
+    ```bash
+    mikrom app list
+    ```
+  </Step>
+</Steps>
+
+## Resource Presets
+
+All apps are deployed using fixed resource presets. Fractional or arbitrary values are not supported — choose one from each column.
+
+| Resource | Available Values | Default |
+|----------|-----------------|---------|
+| CPU cores | `1`, `2`, `3`, `4` | `1` |
+| Memory | `512M`, `1G`, `2G`, `4G` | `512M` |
+
+```bash
+# Maximum preset: 4 vCPUs and 4 GB RAM
+mikrom app deploy --name my-app --cpu 4 --memory 4G
+```
+
+<Tip>
+  Start with the default preset (`1` CPU, `512M` RAM) and scale up only after profiling your application under real load. Mikrom's autoscaling can handle traffic bursts without permanently over-provisioning resources.
+</Tip>
+
+## Hypervisor Selection
+
+Mikrom supports two VMM backends. You can specify your preferred hypervisor at deploy time, or leave it unspecified to let the scheduler decide.
+
+<Tabs>
+  <Tab title="Firecracker">
+    Firecracker is a KVM-based VMM optimised for minimal overhead and sub-second boot times. It is well-suited for stateless, latency-sensitive workloads.
+
+    ```bash
+    mikrom app deploy --name my-app --hypervisor firecracker
+    ```
+
+    - **Boot time:** ~125 ms
+    - **Memory overhead:** ~5 MB per VM
+    - **Best for:** stateless APIs, event-driven workloads
+  </Tab>
+  <Tab title="Cloud Hypervisor">
+    Cloud Hypervisor is a more feature-rich VMM that supports advanced device models and is the required backend for Neon-backed PostgreSQL databases.
+
+    ```bash
+    mikrom app deploy --name my-app --hypervisor cloud-hypervisor
+    ```
+
+    - **Boot time:** ~150–200 ms
+    - **Feature set:** virtio-mem, VFIO, live-migration support
+    - **Best for:** stateful workloads, database-adjacent services
+  </Tab>
+  <Tab title="Unspecified (default)">
+    When no hypervisor is specified, the scheduler selects the best available backend for the target node.
+
+    ```bash
+    mikrom app deploy --name my-app
+    ```
+
+    Use this option when you have no hard dependency on a specific VMM, or when you want maximum scheduling flexibility across a mixed fleet.
+  </Tab>
+</Tabs>
+
+## Managing Deployments
+
+### List all applications
+
+```bash
+mikrom app list
+```
+
+### View deployment history
+
+Each `deploy` command produces a versioned deployment record. Use this command to list all past deployments for a given app.
+
+```bash
+mikrom app deployments --name my-app
+```
+
+### Activate or roll back a deployment
+
+You can promote any previous deployment to active status. This is the primary rollback mechanism — no re-build is required.
+
+```bash
+mikrom app activate --app my-app --deployment-id dep_abc123
+```
+
+<Note>
+  Activating a previous deployment does not delete the current one. The former active deployment is retained in history and can be re-activated at any time.
+</Note>
+
+## GitHub Webhook Integration
+
+Mikrom can automatically redeploy your application whenever you push to your repository. To set this up, retrieve the webhook secret for your app and configure it in your GitHub repository's webhook settings.
+
+```bash
+mikrom app secret --name my-app
+```
+
+Copy the returned secret into your GitHub repository under **Settings → Webhooks**, set the payload URL to your Mikrom API endpoint, and choose the `push` event. Mikrom will then trigger a new deployment on every push to the default branch.
+
+## Deleting an Application
+
+```bash
+mikrom app delete --name my-app
+```
+
+You will be prompted for confirmation. To skip the prompt in scripts, add `--yes`.
+
+<Warning>
+  Deleting an application removes all its deployment history and associated secrets. Active microVMs are terminated immediately. This action cannot be undone.
+</Warning>

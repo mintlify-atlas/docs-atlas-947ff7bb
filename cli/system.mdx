@@ -1,0 +1,105 @@
+---
+title: "mikrom system: Platform Health Checks and Service Status"
+sidebarTitle: "system"
+description: "Inspect the health of all Mikrom platform services from the CLI. Use mikrom system health to diagnose connectivity and service availability issues."
+---
+
+The `mikrom system` command group surfaces the operational health of the Mikrom control plane and supporting services directly from the command line. Rather than logging into the dashboard to check service status, you can run a single command to confirm that the API, scheduler, agent workers, and router are all reachable and responding correctly. This is especially useful when diagnosing connectivity problems, debugging deployment failures, or verifying that a self-hosted Mikrom installation is fully operational after an upgrade.
+
+---
+
+## mikrom system health
+
+Check the health of all platform services. The command contacts the Mikrom API, which in turn aggregates health signals from each internal service and returns a combined status summary.
+
+Services checked include:
+
+- **api** — the control plane API that processes all CLI and dashboard requests
+- **scheduler** — the resource placement and scheduling engine
+- **agent workers** — the microVM lifecycle daemons running on each host node
+- **router** — the Pingora-based ingress router handling inbound application traffic
+
+```bash
+mikrom system health
+```
+
+**Example output — healthy system**
+
+```
+Service     Status    Latency
+api         healthy   12ms
+scheduler   healthy   8ms
+agent       healthy   5ms
+router      healthy   4ms
+
+All services are operational.
+```
+
+**Example output — degraded service**
+
+```
+Service     Status    Latency
+api         healthy   11ms
+scheduler   degraded  —
+agent       healthy   6ms
+router      healthy   4ms
+
+Warning: 1 service is degraded. Check scheduler logs for details.
+```
+
+<Note>
+  `mikrom system health` is the first command to run when you suspect connectivity issues between the CLI and the platform. A failed `api` status usually means the configured `api-url` is unreachable — verify it with `mikrom config show` and update it with `mikrom config set api-url <url>` if needed.
+</Note>
+
+---
+
+## Shell Completion: mikrom completion
+
+The `mikrom completion` command generates shell completion scripts so that pressing <kbd>Tab</kbd> in your shell autocompletes `mikrom` commands, subcommands, and flags. Completions are available for **bash**, **zsh**, **fish**, **elvish**, and **powershell**.
+
+```bash
+mikrom completion <shell>
+```
+
+<ParamField path="shell" type="string" required>
+  The shell to generate completions for. Accepted values: `bash`, `zsh`, `fish`, `elvish`, `powershell`.
+</ParamField>
+
+### Bash
+
+Append the completion script to your `.bashrc` and reload the shell:
+
+```bash
+mikrom completion bash >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Zsh
+
+Add completions to your `.zshrc`:
+
+```bash
+mikrom completion zsh >> ~/.zshrc
+source ~/.zshrc
+```
+
+### Fish
+
+Write the completion file to the standard Fish completions directory:
+
+```bash
+mikrom completion fish > ~/.config/fish/completions/mikrom.fish
+```
+
+### PowerShell
+
+Add completions to your PowerShell profile:
+
+```powershell
+mikrom completion powershell >> $PROFILE
+. $PROFILE
+```
+
+<Tip>
+  If completions are not triggering after sourcing your shell config, ensure that your shell's completion system is initialised. For zsh, confirm that `autoload -Uz compinit && compinit` appears in your `.zshrc` before the completion line.
+</Tip>

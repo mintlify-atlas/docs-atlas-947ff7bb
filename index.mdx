@@ -1,20 +1,94 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Mikrom: Open-Source Edge Platform for MicroVM Workloads"
+sidebarTitle: "Home"
+description: "Mikrom deploys containerized workloads into Firecracker and Cloud Hypervisor microVMs with automatic TLS, WireGuard networking, and a full Rust control plane."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+Mikrom is a Rust-first edge platform for deploying applications into isolated microVMs. Point it at a Git repository, choose your CPU and RAM preset, and Mikrom handles building the OCI image, scheduling the workload onto a worker node, wiring up ingress routing with automatic TLS, and connecting everything through an internal WireGuard mesh.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Deploy your first application in minutes using the CLI or dashboard.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand how the control plane, traffic plane, and platform services fit together.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Full reference for every `mikrom` command, flag, and output format.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/api">
+    Environment variables and runtime options for every Mikrom service.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What Mikrom Does
+
+Mikrom turns a Git repository URL into a running microVM workload. The platform supports Phoenix, Rails, Django, Laravel, Go, Rust, JavaScript, Static, and Docker-based applications — the builder detects the stack and produces an OCI image without any additional configuration.
+
+<CardGroup cols={2}>
+  <Card title="Deploy Applications" icon="code-branch" href="/deployment/apps">
+    Create apps from Git repos and deploy with selectable CPU and RAM presets.
+  </Card>
+  <Card title="Managed Databases" icon="database" href="/deployment/databases">
+    Provision Neon-backed PostgreSQL databases running in Cloud Hypervisor microVMs.
+  </Card>
+  <Card title="Persistent Volumes" icon="hard-drive" href="/deployment/volumes">
+    Attach Ceph-backed block volumes with snapshot and restore support.
+  </Card>
+  <Card title="Autoscaling" icon="chart-line" href="/deployment/scaling">
+    Configure fixed replicas or CPU/memory-based autoscaling. All apps scale to zero automatically.
+  </Card>
+</CardGroup>
+
+## Platform Services
+
+<CardGroup cols={3}>
+  <Card title="Router" icon="network-wired" href="/services/router">
+    Pingora-based ingress with automatic TLS and ACME certificate management.
+  </Card>
+  <Card title="Networking" icon="shield" href="/services/networking">
+    WireGuard mesh that connects workers, databases, and platform services.
+  </Card>
+  <Card title="DNS" icon="globe" href="/services/dns">
+    Internal name resolution with DNS64 synthesis for IPv4 egress.
+  </Card>
+  <Card title="Agent" icon="server" href="/services/agent">
+    Worker daemon that manages microVM lifecycle, metrics, and log streaming.
+  </Card>
+  <Card title="Builder" icon="hammer" href="/services/builder">
+    Source-to-image engine that converts Git repos into OCI images via BuildKit.
+  </Card>
+  <Card title="Scheduler" icon="calendar" href="/services/scheduler">
+    Placement engine that assigns workloads to worker nodes based on capacity.
+  </Card>
+</CardGroup>
+
+## Get Started
+
+<Steps>
+  <Step title="Install the CLI">
+    Build and install the `mikrom` binary from the workspace.
+    ```bash
+    make install-cli
+    ```
+  </Step>
+  <Step title="Authenticate">
+    Log in with your email and password to obtain a session token.
+    ```bash
+    mikrom auth login --email user@example.com --password secret
+    ```
+  </Step>
+  <Step title="Create and deploy an application">
+    Point Mikrom at a Git repository and trigger a build and deployment.
+    ```bash
+    mikrom app create --name my-app --git-url https://github.com/user/my-app.git
+    mikrom app deploy --name my-app --cpu 2 --memory 1G
+    ```
+  </Step>
+  <Step title="Check deployment status">
+    List active deployments across all apps to confirm your workload is running.
+    ```bash
+    mikrom deployment list
+    ```
+  </Step>
+</Steps>

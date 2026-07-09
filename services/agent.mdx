@@ -1,0 +1,172 @@
+---
+title: "mikrom-agent: Worker Node Daemon for MicroVM Lifecycle"
+sidebarTitle: "Agent"
+description: "mikrom-agent runs on every compute node to manage Firecracker and Cloud Hypervisor microVM lifecycle, host metrics, log streaming, and the eBPF data plane."
+---
+
+`mikrom-agent` is the worker daemon that runs on each compute node in the Mikrom cluster. It receives placement commands from `mikrom-scheduler` over NATS, then drives the full lifecycle of microVMs on that host—creating, starting, pausing, resuming, and cleaning up Firecracker or Cloud Hypervisor VMs. In addition to VM lifecycle management, the agent reports host and VM metrics back to the scheduler, streams workload logs to the control plane, loads the `mikrom-agent-ebpf` data-plane program, and starts the `tundra-nat64` translator that enables IPv4 egress from the IPv6-only internal network.
+
+**Port:** `5003`
+
+## Responsibilities
+
+<CardGroup cols={2}>
+  <Card title="VM Lifecycle" icon="server">
+    Creates, starts, stops, pauses, resumes, and destroys Firecracker and Cloud Hypervisor microVMs in response to scheduler commands.
+  </Card>
+  <Card title="Worker Registration" icon="plug">
+    Registers the worker node with the scheduler on startup and sends periodic heartbeats carrying CPU, RAM, and disk capacity metrics.
+  </Card>
+  <Card title="Log Streaming" icon="scroll">
+    Captures stdout/stderr from running workloads and ships them to the control plane for display in the dashboard and CLI.
+  </Card>
+  <Card title="eBPF Data Plane" icon="microchip">
+    Embeds and loads the `mikrom-agent-ebpf` program for host-side network handling and metrics collection.
+  </Card>
+  <Card title="NAT64 Translation" icon="arrow-right-arrow-left">
+    Starts a singleton `tundra-nat64` translator on the host bridge, enabling IPv4 egress from workloads via DNS64 answers from `mikrom-dns`.
+  </Card>
+  <Card title="Host Metrics" icon="chart-line">
+    Collects and reports CPU, RAM, disk, and per-VM metrics to the scheduler for capacity-aware placement decisions.
+  </Card>
+</CardGroup>
+
+## Hypervisor Support
+
+<Tabs>
+  <Tab title="Firecracker">
+    Firecracker is the **default hypervisor** for application workloads. It provides sub-second boot times and strong isolation with a minimal device model.
+
+    - Used for standard app deployments.
+    - Boots using the Zig-built `mikrom-init` binary embedded in the microVM image.
+    - Socket-based API for lifecycle management.
+  </Tab>
+  <Tab title="Cloud Hypervisor">
+    Cloud Hypervisor is used for **Neon database VMs** that require a richer virtual device model.
+
+    - Selected automatically for PostgreSQL workloads provisioned through the Neon integration.
+    - Supports pause/resume for database checkpointing.
+    - HTTP API for lifecycle management via a Unix socket.
+  </Tab>
+</Tabs>
+
+## eBPF Data Plane
+
+The agent embeds the compiled `mikrom-agent-ebpf` artifact at build time. The build script (`build.rs`) reads the program from `target/bpfel-unknown-none/release/mikrom-agent-ebpf` and embeds it into the agent binary. At runtime, the agent loads it into the kernel for host-side networking support and metrics collection.
+
+```text
+Build pipeline:
+  mikrom-agent-ebpf  ──(cargo build)──►  target/bpfel-unknown-none/release/mikrom-agent-ebpf
+                                                    │
+  mikrom-agent build.rs  ◄──embeds────────────────┘
+                                                    │
+  mikrom-agent runtime  ──loads into kernel────────┘
+```
+
+<Note>
+  The eBPF build uses Rust nightly with `-Z build-std=core`. Keep the eBPF build path in sync with the Dagger CI runner when modifying the build pipeline.
+</Note>
+
+## NATS Command Handling
+
+The agent subscribes to NATS subjects controlled by the scheduler. The communication model is request-reply: the scheduler sends a placement command and waits for the agent's acknowledgement within the configured timeout.
+
+```text
+mikrom-scheduler  ──NATS request──►  mikrom-agent  ──creates VM──►  microVM
+                  ◄──NATS reply────  (ack / error)
+```
+
+## Timeout Configuration
+
+All timeout values are runtime-configurable via environment variables. Defaults are conservative to accommodate a range of hardware.
+
+### NATS Timeouts
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_NATS_CONNECT_TIMEOUT_SECS` | `5` | Timeout for the initial NATS connection |
+| `AGENT_NATS_MAX_BACKOFF_SECS` | `60` | Maximum backoff between NATS reconnect attempts |
+| `AGENT_NATS_CIRCUIT_BREAKER_COOLDOWN_SECS` | `300` | Cooldown before retrying after a circuit-breaker trip |
+
+### Cloud Hypervisor Timeouts
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_CLOUD_HYPERVISOR_SOCKET_WAIT_TIMEOUT_SECS` | `10` | Time to wait for the Cloud Hypervisor socket to appear |
+| `AGENT_CLOUD_HYPERVISOR_API_CONNECT_TIMEOUT_SECS` | `5` | Timeout for HTTP API connection to Cloud Hypervisor |
+| `AGENT_CLOUD_HYPERVISOR_API_STATUS_TIMEOUT_SECS` | `30` | Timeout waiting for a status response |
+| `AGENT_CLOUD_HYPERVISOR_API_HEADER_TIMEOUT_SECS` | `10` | Timeout reading HTTP response headers |
+| `AGENT_CLOUD_HYPERVISOR_API_BODY_TIMEOUT_SECS` | `60` | Timeout reading HTTP response body |
+| `AGENT_CLOUD_HYPERVISOR_CONFIGURE_CLIENT_TIMEOUT_SECS` | `5` | Timeout for the configure-phase HTTP client |
+| `AGENT_CLOUD_HYPERVISOR_CONFIGURE_REQUEST_TIMEOUT_SECS` | `6` | Timeout for individual configure requests |
+| `AGENT_CLOUD_HYPERVISOR_CONFIGURE_BACKOFF_MAX_SECS` | `5` | Maximum backoff during configure retries |
+
+### Firecracker Timeouts
+
+| Variable | Default | Description |
+|---|---|---|
+| `FC_SOCKET_WAIT_TIMEOUT_SECS` | `120` | Time to wait for the Firecracker socket (non-jailer boot path) |
+| `FC_SOCKET_WAIT_CHROOT_SECS` | `10` | Time to wait for the socket inside a chroot |
+| `FC_API_CONNECT_TIMEOUT_SECS` | `2` | Timeout for HTTP API connection to Firecracker |
+| `FC_API_STATUS_TIMEOUT_SECS` | `30` | Timeout waiting for a status response |
+| `FC_API_HEADER_TIMEOUT_SECS` | `10` | Timeout reading HTTP response headers |
+| `FC_API_BODY_TIMEOUT_SECS` | `60` | Timeout reading HTTP response body |
+| `FC_PROCESS_TERMINATE_TIMEOUT_SECS` | `10` | Grace period for process termination (SIGTERM) |
+| `FC_PROCESS_KILL_TIMEOUT_SECS` | `2` | Grace period before sending SIGKILL |
+| `FC_VFS_TERMINATE_TIMEOUT_SECS` | `5` | Grace period for VFS process termination |
+| `FC_VFS_KILL_TIMEOUT_SECS` | `2` | Grace period before sending VFS SIGKILL |
+
+<Warning>
+  `FC_SOCKET_WAIT_TIMEOUT_SECS` defaults to `120` seconds to accommodate slower hosts on the non-jailer boot path. Lower this value only if your hardware consistently produces faster Firecracker startup times.
+</Warning>
+
+## Runtime Dependencies
+
+- **NATS** — command and control channel from the scheduler
+- **Firecracker** or **Cloud Hypervisor** — hypervisor binary on the host
+- **`mikrom-init`** — Zig-built init binary embedded in microVM images; must be present in the image root
+- **`mikrom-network`** — WireGuard mesh connectivity; must be running on the same host
+- **`mikrom-dns`** — provides DNS64 answers that feed the NAT64 translator
+- **`mikrom-agent-ebpf`** — compiled eBPF payload, embedded at build time
+
+## Key Source Files
+
+| File | Purpose |
+|---|---|
+| `src/main.rs` | Process bootstrap and runtime wiring |
+| `src/agent.rs` | VM orchestration and scheduler integration |
+| `src/metrics.rs` | Host metric collection |
+| `src/ebpf/` | Agent-side integration for the compiled eBPF payload |
+| `build.rs` | Embeds the eBPF artifact from `target/bpfel-unknown-none/release` |
+
+## Debian Package
+
+A Debian package is available for production deployments.
+
+```bash
+make deb-agent   # Build the .deb for mikrom-agent
+```
+
+<Tip>
+  On systemd deployments, load `DT_API_TOKEN` from `/etc/mikrom/dynatrace.env` instead of embedding it in `agent.env`. A template is provided at `debian/etc/mikrom/dynatrace.env.example`.
+</Tip>
+
+## Local Development
+
+```bash
+make run-agent     # Start the agent against local infrastructure
+make ci-smoke      # fmt + clippy
+make ci-fast       # Full workspace test suite
+make ci-full       # Adds release build + eBPF validation
+```
+
+## Testing
+
+- Prefer workspace-level CI profiles for the full agent + eBPF path.
+- The NATS integration test is opt-in: `make ci-external-tests` sets `MIKROM_RUN_NATS_TESTS=1`.
+- Ceph storage tests require a live Ceph cluster: set `MIKROM_RUN_CEPH_TESTS=1` or use the dedicated `ceph-tests` GitHub Actions job on a self-hosted runner labeled `ceph`.
+- For end-to-end NAT64/DNS64 smoke validation, follow the steps in `docs/nat64-dns64-smoke-checklist.md`.
+
+<Info>
+  When making changes to VM lifecycle behavior, always validate against the scheduler and networking services together rather than running the agent in isolation. The three services form a tightly coupled placement-and-boot pipeline.
+</Info>

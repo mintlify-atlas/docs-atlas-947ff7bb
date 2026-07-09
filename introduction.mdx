@@ -1,0 +1,105 @@
+---
+title: "Mikrom: Rust-First Open-Source Edge Platform"
+sidebarTitle: "Introduction"
+description: "Mikrom deploys containerized apps into Firecracker and Cloud Hypervisor microVMs with automatic TLS, WireGuard mesh networking, and a zero-config Git deployment pipeline."
+---
+
+Mikrom is a Rust-first, open-source edge platform designed for deploying containerized workloads into lightweight microVMs powered by [Firecracker](https://firecracker-microvm.github.io/) or [Cloud Hypervisor](https://www.cloudhypervisor.org/). Every application gets hardware-level isolation in its own microVM, a dedicated ingress route with automatic TLS, and a placement decision made by a scheduler that coordinates workers over NATS — all driven from a single `mikrom app deploy` command or a push to your Git repository.
+
+## What Is Mikrom?
+
+Mikrom is built around the principle that strong isolation and developer simplicity should not be mutually exclusive. Rather than sharing a kernel across tenants, each deployed workload runs inside its own Firecracker or Cloud Hypervisor microVM. The control plane is a lean Rust binary (`mikrom-api`) backed by PostgreSQL and NATS; the web dashboard is SvelteKit; and every service in the stack — from the Pingora-based ingress router to the WireGuard mesh and the internal DNS resolver — is written in Rust and designed to be operated independently or composed together.
+
+## Key Components
+
+Mikrom is organized as a Rust workspace. Each directory is a standalone service or library crate:
+
+| Component | Role |
+|---|---|
+| `mikrom-api` | Control plane API — auth, app lifecycle, deployments, secrets, databases, webhooks, and billing |
+| `mikrom-app` | SvelteKit operator dashboard with Svelte 5, Tailwind CSS 4, and Playwright e2e tests |
+| `mikrom-cli` | Rust CLI client for day-to-day operations and automation |
+| `mikrom-router` | Pingora-based ingress router with ACME/TLS, health checks, and WireGuard-aware traffic routing |
+| `mikrom-agent` | Worker daemon that manages microVM lifecycle, metrics, logs, and host coordination |
+| `mikrom-builder` | Source-to-image build engine that turns Git repositories into OCI images via BuildKit |
+| `mikrom-scheduler` | Placement engine and worker registry that assigns workloads to available agents |
+| `mikrom-network` | WireGuard mesh and host identity coordination service |
+| `mikrom-dns` | Internal DNS resolver with DNS64 synthesis for platform and tenant resources |
+| `mikrom-init` | Zig-built binary that boots the guest workload environment inside each microVM |
+| `mikrom-agent-ebpf` | eBPF payload loaded by the agent for host-side networking and data-plane metrics |
+| `mikrom-proto` | Shared protobuf definitions and generated Rust types for internal service communication |
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Zero-Config Git Deployment" icon="git-branch">
+    Point Mikrom at a Git repository URL and the builder, scheduler, and agent pipeline handles the rest — image build, placement, and microVM boot included.
+  </Card>
+  <Card title="MicroVM Isolation" icon="shield-check">
+    Every workload runs inside its own Firecracker or Cloud Hypervisor microVM, providing hardware-level isolation without the overhead of full VMs.
+  </Card>
+  <Card title="Automatic TLS" icon="lock">
+    The Pingora-based router handles ACME certificate provisioning and renewal automatically for every application hostname.
+  </Card>
+  <Card title="PostgreSQL via Neon" icon="database">
+    Managed PostgreSQL databases are provisioned through Neon and run in Cloud Hypervisor-backed microVMs when deployed on the platform. Defaults to PostgreSQL 16.
+  </Card>
+  <Card title="WireGuard Mesh" icon="network-wired">
+    `mikrom-network` maintains a WireGuard overlay mesh across all worker nodes, giving every service and workload a stable private address.
+  </Card>
+  <Card title="eBPF Data Plane" icon="bolt">
+    `mikrom-agent-ebpf` provides the compiled eBPF payload loaded by the agent for host-side network handling and low-overhead metrics collection.
+  </Card>
+  <Card title="Scale-to-Zero Autoscaling" icon="arrow-down-to-line">
+    All applications scale to zero automatically after inactivity. Autoscaling can be configured with CPU and memory thresholds and a min/max replica range.
+  </Card>
+  <Card title="Dagger-Backed CI/CD" icon="circle-play">
+    A local Dagger CI runner provides fast-feedback profiles from `ci-smoke` to `ci-release`, runnable locally or inside GitHub Actions without environment drift.
+  </Card>
+</CardGroup>
+
+## Supported Application Stacks
+
+Mikrom's builder recognizes and auto-configures the following application runtimes out of the box:
+
+- **Phoenix** (Elixir)
+- **Static** sites
+- **Ruby on Rails**
+- **Docker** (bring-your-own Dockerfile)
+- **Go**
+- **Rust**
+- **Django** (Python)
+- **Laravel** (PHP)
+- **JavaScript** (Node.js)
+
+<Note>
+  If your stack ships a `Dockerfile`, Mikrom will use it directly. The builder falls back to automatic detection only when no `Dockerfile` is present.
+</Note>
+
+## Observability
+
+Mikrom ships with Dynatrace-backed OpenTelemetry instrumentation across all services. In the local development stack, a pre-configured `otel-lgtm` container (Grafana, Prometheus, Loki, and Tempo) collects and visualises traces, metrics, and logs from every running service.
+
+## Technology Stack
+
+- **Backend:** Rust 2024 edition, Tokio, Axum, SQLx, async-nats, reqwest, tracing, OpenTelemetry
+- **Router:** Rust + Pingora, PostgreSQL, NATS, OpenSSL, WireGuard tooling
+- **Frontend:** SvelteKit, Svelte 5, Vite, Tailwind CSS 4, shadcn-svelte, bits-ui, Lucide, Vitest, Playwright
+- **Platform & tooling:** Firecracker, Cloud Hypervisor, PostgreSQL, Neon, NATS, Docker Compose, Dagger, BuildKit, GitHub Actions
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get Mikrom running locally, install the CLI, and deploy your first application in minutes.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Explore the request flow, service responsibilities, and coordination model in depth.
+  </Card>
+  <Card title="CLI Overview" icon="terminal" href="/cli/overview">
+    Browse every CLI command group — auth, app, deployment, db, volume, project, and more.
+  </Card>
+  <Card title="API Configuration" icon="sliders" href="/configuration/api">
+    Review `mikrom-api` environment variables, rate-limiting knobs, and Neon integration options.
+  </Card>
+</CardGroup>

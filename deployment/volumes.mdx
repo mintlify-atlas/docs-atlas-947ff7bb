@@ -1,0 +1,154 @@
+---
+title: "Persistent Volumes: Attach and Manage Block Storage"
+sidebarTitle: "Volumes"
+description: "Create, attach, and snapshot Ceph RBD-backed persistent block volumes for Mikrom application microVMs with configurable access modes and restore support."
+---
+
+Mikrom persistent volumes are network-attached block devices backed by Ceph RBD (RADOS Block Device). Unlike the ephemeral root filesystem inside each microVM — which is discarded when the VM stops — volumes retain their contents across deployments, restarts, and app redeployments. You can attach a volume to any application microVM at a chosen mount point, take snapshots for point-in-time recovery, and move volumes between applications by detaching and re-attaching them.
+
+## Creating a Volume
+
+Volumes are sized in MiB at creation time. The size cannot be changed after creation without snapshotting and restoring.
+
+```bash
+mikrom volume create --name my-data --size 10240
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name` | Display name for the volume |
+| `--size` | Size in MiB (e.g. `10240` = 10 GiB) |
+
+## Listing Volumes
+
+List all volumes in your active project:
+
+```bash
+mikrom volume list
+```
+
+Filter by the application a volume is attached to:
+
+```bash
+mikrom volume list --app my-app
+```
+
+## Attaching a Volume
+
+Attach a volume to an application and specify the path inside the microVM where the block device should be mounted.
+
+```bash
+mikrom volume attach \
+  --app my-app \
+  --volume-id vol_abc123 \
+  --mount /data
+```
+
+### Access Modes
+
+The `--mode` flag controls how many VMs can access the volume simultaneously.
+
+| Mode | Value | Description |
+|------|-------|-------------|
+| ReadWriteOnce (RWO) | `0` | Single VM read/write access (default) |
+| ReadWriteMany (RWX) | `1` | Multiple VMs can read and write concurrently |
+| ReadOnlyMany (ROX) | `2` | Multiple VMs can read; no VM can write |
+
+```bash
+# Attach in ReadWriteMany mode for shared access
+mikrom volume attach \
+  --app my-app \
+  --volume-id vol_abc123 \
+  --mount /shared \
+  --mode 1
+```
+
+<Note>
+  If you try to attach a volume that is already attached to another application in RWO mode (`--mode 0`), the operation will be rejected. Detach it from the current application first, or re-attach using RWX mode if concurrent access is acceptable for your workload.
+</Note>
+
+## Detaching a Volume
+
+```bash
+mikrom volume detach --app my-app --volume-id vol_abc123
+```
+
+Detaching is non-destructive — the volume and all its data remain intact and can be re-attached to the same or a different application.
+
+## Snapshots
+
+Snapshots capture the exact byte-level state of a volume at a point in time. They are stored as Ceph RBD snapshots and are independent of the application that owns the volume.
+
+### Create a snapshot
+
+```bash
+mikrom volume snapshot --volume-id vol_abc123 --name before-migration
+```
+
+### Restore a volume from a snapshot
+
+Restoring overwrites the volume's current contents with the snapshot state. The volume must be detached before a restore can proceed.
+
+```bash
+mikrom volume restore --volume-id vol_abc123 --snapshot before-migration
+```
+
+<Warning>
+  Restoring a snapshot is **irreversible** for the current volume state. Any data written after the snapshot was taken will be permanently lost. If you need to compare the current state with the snapshot, create a new volume from the snapshot instead of restoring in place.
+
+  Additionally, if you attempt to **delete a volume that has existing snapshots**, the operation will be blocked until all snapshots are removed. Delete each snapshot individually with `mikrom volume snapshots delete` before deleting the volume.
+</Warning>
+
+### List snapshots for a volume
+
+```bash
+mikrom volume snapshots list --volume-id vol_abc123
+```
+
+### Delete a specific snapshot
+
+```bash
+mikrom volume snapshots delete --snapshot-id snap_xyz789
+```
+
+## Deleting a Volume
+
+```bash
+mikrom volume delete --volume-id vol_abc123
+```
+
+You will be prompted for confirmation. Pass `--yes` to skip the prompt in scripts.
+
+<Warning>
+  A volume must be **detached from all applications** and **all snapshots must be deleted** before it can be removed. The CLI will return an error if either condition is not met.
+</Warning>
+
+## Common Workflows
+
+<Accordion title="Migrating a volume to a new application">
+  1. Detach the volume from the current app:
+     ```bash
+     mikrom volume detach --app old-app --volume-id vol_abc123
+     ```
+  2. Attach it to the new app at the desired mount point:
+     ```bash
+     mikrom volume attach --app new-app --volume-id vol_abc123 --mount /data
+     ```
+</Accordion>
+
+<Accordion title="Creating a pre-deployment checkpoint">
+  Before a potentially destructive migration, snapshot your volume so you can restore quickly if something goes wrong:
+
+  ```bash
+  mikrom volume snapshot --volume-id vol_abc123 --name pre-deploy-v3
+  mikrom app deploy --name my-app --cpu 2 --memory 1G
+  ```
+
+  If the migration fails, restore the volume:
+
+  ```bash
+  mikrom volume detach --app my-app --volume-id vol_abc123
+  mikrom volume restore --volume-id vol_abc123 --snapshot pre-deploy-v3
+  mikrom volume attach --app my-app --volume-id vol_abc123 --mount /data
+  ```
+</Accordion>

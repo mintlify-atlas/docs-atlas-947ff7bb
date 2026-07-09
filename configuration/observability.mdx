@@ -1,0 +1,196 @@
+---
+title: "OpenTelemetry Observability Setup for Mikrom Services"
+sidebarTitle: "Observability"
+description: "Configure Dynatrace-backed OpenTelemetry traces, metrics, and logs for Mikrom, and run the local Grafana, Prometheus, Loki, and Tempo dev stack."
+---
+
+Mikrom ships first-class OpenTelemetry observability across all its services — `mikrom-api`, `mikrom-agent`, `mikrom-router`, and `mikrom-scheduler`. In production, telemetry is exported to Dynatrace via the OTLP HTTP protocol. In local development, the same OTLP pipeline is pointed at an all-in-one `grafana/otel-lgtm` container that bundles Grafana, Prometheus, Loki, and Tempo — giving you traces, metrics, and structured logs without any external account.
+
+## Overview
+
+<CardGroup cols={2}>
+  <Card title="Traces" icon="share-nodes">
+    Distributed traces are exported via OTLP HTTP. Correlated trace IDs appear in structured logs when `LOG_FORMAT=json`.
+  </Card>
+  <Card title="Metrics" icon="chart-line">
+    Prometheus-compatible metrics are scraped from `mikrom-scheduler` (port `5003`), `mikrom-agent` (port `5002`), and `mikrom-router` (port `9092`).
+  </Card>
+  <Card title="Logs" icon="scroll">
+    Structured JSON logs from all services are ingested by Loki. Set `LOG_FORMAT=json` on every service for correlated log queries.
+  </Card>
+  <Card title="Dashboards" icon="gauge">
+    Pre-built Grafana dashboards for the platform, scheduler, and infrastructure are provisioned automatically when the local stack starts.
+  </Card>
+</CardGroup>
+
+---
+
+## Environment Variables
+
+All Mikrom services share the same set of observability variables. Configure each service with identical values so that trace IDs are correlated across service boundaries.
+
+<Note>
+  Point **all** services — `mikrom-api`, `mikrom-agent`, `mikrom-router`, and `mikrom-scheduler` — at the same `OTEL_EXPORTER_OTLP_ENDPOINT`. Using different endpoints for different services breaks distributed trace correlation and makes root-cause analysis much harder.
+</Note>
+
+<ParamField body="ENABLE_TELEMETRY" type="boolean" default="true">
+  Master switch for OpenTelemetry export. Set to `false` to disable all trace and metric export (useful when running unit tests or in air-gapped environments).
+</ParamField>
+
+<ParamField body="OTEL_EXPORTER_OTLP_ENDPOINT" type="string">
+  OTLP HTTP endpoint that receives traces and metrics. For local development use `http://[::1]:4318/api/v2/otlp`. For Dynatrace, use your tenant's OTLP ingest URL (see `DT_API_URL`).
+</ParamField>
+
+<ParamField body="DT_API_URL" type="string" default="http://[::1]:4318/api/v2/otlp">
+  Dynatrace OTLP ingest URL. In local development this points at the `otel-lgtm` container. In production, set this to your Dynatrace environment's OTLP endpoint, e.g. `https://<your-env-id>.live.dynatrace.com/api/v2/otlp`.
+</ParamField>
+
+<ParamField body="DT_API_TOKEN" type="string">
+  Dynatrace API token with `openTelemetryTrace.ingest` and `metrics.ingest` scopes. Leave unset for local development against the `otel-lgtm` container. On systemd agent deployments, load this from `/etc/mikrom/dynatrace.env` (see [Agent Config](/configuration/agent)).
+</ParamField>
+
+<ParamField body="LOG_FORMAT" type="string" default="json">
+  Log output format. Set to `json` for structured, machine-readable logs (recommended in production and required for Loki log correlation). Any other value enables human-readable, colourised output suited to interactive development.
+</ParamField>
+
+---
+
+## Local Development Stack
+
+The local observability stack is based on [`grafana/otel-lgtm`](https://hub.docker.com/r/grafana/otel-lgtm), a single Docker image that includes Grafana, Prometheus, Loki, and Tempo pre-wired together. It is started via a Docker Compose profile so it does not run unless explicitly requested.
+
+### Exposed Ports
+
+| Port | Service |
+|---|---|
+| `3000` | Grafana UI |
+| `4317` | OTLP gRPC receiver |
+| `4318` | OTLP HTTP receiver |
+| `9090` | Prometheus |
+| `3100` | Loki |
+| `3200` | Tempo |
+
+### Starting and Connecting Services
+
+<Steps>
+  <Step title="Start the observability stack">
+    Run the `up-observability` Make target to pull and start `otel-lgtm` in the background:
+
+    ```bash
+    make up-observability
+    ```
+
+    This is equivalent to:
+
+    ```bash
+    docker compose --profile observability up --build -d otel-lgtm
+    ```
+  </Step>
+
+  <Step title="Verify the stack is healthy">
+    Follow the container logs to confirm Grafana, Prometheus, Loki, and Tempo have all started:
+
+    ```bash
+    make logs-observability
+    ```
+
+    Wait until you see Grafana output confirming it is ready to serve UI requests on port `3000`.
+  </Step>
+
+  <Step title="Configure services to export telemetry">
+    Ensure each Mikrom service has the following environment variables set (these are already present in the default `.env.example` files):
+
+    ```env
+    ENABLE_TELEMETRY=true
+    DT_API_URL=http://[::1]:4318/api/v2/otlp
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://[::1]:4318/api/v2/otlp
+    LOG_FORMAT=json
+    ```
+
+    Start (or restart) the services so they pick up the updated configuration:
+
+    ```bash
+    make run-api
+    make run-agent
+    ```
+  </Step>
+
+  <Step title="Open Grafana">
+    Navigate to [http://localhost:3000](http://localhost:3000) in your browser. The default credentials are `admin` / `admin`.
+
+    Three dashboards are provisioned automatically under the **Mikrom** folder:
+
+    - **Mikrom** — application-level request rates, latencies, and error counts.
+    - **Scheduler** — job queue depths, scheduling latency, and worker heartbeat state.
+    - **Infrastructure** — host CPU, RAM, disk, and microVM density per node.
+  </Step>
+</Steps>
+
+---
+
+## Production: Dynatrace
+
+In production, replace the local OTLP endpoint with your Dynatrace environment's ingest URL and supply a valid API token.
+
+```env
+ENABLE_TELEMETRY=true
+DT_API_URL=https://<your-env-id>.live.dynatrace.com/api/v2/otlp
+DT_API_TOKEN=dt0c01.<redacted>
+OTEL_EXPORTER_OTLP_ENDPOINT=https://<your-env-id>.live.dynatrace.com/api/v2/otlp
+LOG_FORMAT=json
+```
+
+<Warning>
+  `DT_API_TOKEN` is a long-lived credential. Store it in a secrets manager and inject it at runtime. On systemd-managed agent nodes, write it to `/etc/mikrom/dynatrace.env` (mode `0600`, owned by `root`) — the `mikrom-agent.service` unit loads that file automatically via `EnvironmentFile=-/etc/mikrom/dynatrace.env`.
+</Warning>
+
+The Dynatrace token requires the following access scopes:
+
+- `openTelemetryTrace.ingest` — for distributed traces.
+- `metrics.ingest` — for OTLP metrics.
+- `logs.ingest` — for structured log forwarding (if using the Dynatrace log ingest endpoint).
+
+---
+
+## Prometheus Scrape Targets
+
+The bundled `observability/prometheus.yml` configures Prometheus to scrape the following targets via `host.docker.internal`, allowing the container to reach services running on the host:
+
+```yaml
+scrape_configs:
+  - job_name: "mikrom-scheduler"
+    static_configs:
+      - targets: ["host.docker.internal:5003"]
+  - job_name: "mikrom-agent"
+    static_configs:
+      - targets: ["host.docker.internal:5002"]
+  - job_name: "mikrom-router"
+    static_configs:
+      - targets: ["host.docker.internal:9092"]
+```
+
+<Tip>
+  If you run multiple agent nodes locally (e.g. in a multi-node test), add additional entries under `mikrom-agent`'s `static_configs` targets list. Each agent exposes its Prometheus endpoint on port `5002`.
+</Tip>
+
+---
+
+## Grafana Data Sources
+
+The following data sources are provisioned automatically when the `otel-lgtm` container starts, and are available immediately in Grafana without any manual configuration:
+
+| Data Source | Type | URL |
+|---|---|---|
+| Prometheus | Metrics | `http://localhost:9090` |
+| Loki | Logs | `http://localhost:3100` |
+| Tempo | Traces | `http://localhost:3200` |
+
+---
+
+## Log Format Recommendation
+
+<Note>
+  Set `LOG_FORMAT=json` on all services in both production and local development when observability is enabled. Structured JSON logs allow Loki to index individual fields (such as `trace_id`, `span_id`, `service.name`, and `error`) and let you jump directly from a log line to its associated distributed trace in Tempo via Grafana's trace-to-log correlation feature.
+</Note>
+
+In development without the observability stack running, you may prefer to omit `LOG_FORMAT` (or set it to any value other than `json`) for colourised, human-readable terminal output.

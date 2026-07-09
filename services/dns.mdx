@@ -1,0 +1,119 @@
+---
+title: "Internal DNS Resolution and DNS64 Synthesis: mikrom-dns"
+sidebarTitle: "DNS"
+description: "mikrom-dns resolves internal service names under *.mikrom.internal and synthesizes DNS64 AAAA records so workloads reach IPv4 services via NAT64."
+---
+
+`mikrom-dns` is the internal DNS resolver for the Mikrom platform. It maintains three DNS zones that cover platform control-plane services, worker node identities, and tenant workloads. Records are populated reactively from NATS events—when a new worker registers or a microVM is assigned an address, `mikrom-dns` learns about it immediately and makes the name resolvable across the mesh. For external names, `mikrom-dns` synthesizes DNS64 `AAAA` records so workloads running on the IPv6-only internal network can reach IPv4 services on the public internet through NAT64 translation on the host bridge.
+
+## DNS Zones
+
+| Zone | Purpose |
+|---|---|
+| `s.mikrom.internal.` | Core control-plane services (API, router, scheduler, builder) |
+| `n.mikrom.internal.` | Network node and worker node identities |
+| `u.mikrom.internal.` | Customer resources, microVMs, and tenant-specific entries |
+
+## Responsibilities
+
+<CardGroup cols={2}>
+  <Card title="Internal Name Resolution" icon="magnifying-glass">
+    Resolves service names, worker identities, and tenant resource names to their WireGuard mesh IPv6 addresses.
+  </Card>
+  <Card title="DNS64 Synthesis" icon="shuffle">
+    Synthesizes `AAAA` records from upstream `A` records so IPv4-only external services are reachable from the IPv6-internal network.
+  </Card>
+  <Card title="Reactive Updates" icon="bolt">
+    NATS events from `mikrom-network` and `mikrom-api` trigger DNS record updates without requiring a service restart.
+  </Card>
+  <Card title="Upstream Forwarding" icon="arrow-up-right">
+    Forwards external queries to the configured upstream resolvers (defaults to Cloudflare and Google IPv6 resolvers).
+  </Card>
+</CardGroup>
+
+## DNS64 and NAT64
+
+The internal network is IPv6-only. To allow workloads to reach IPv4 services on the public internet, Mikrom uses a DNS64 + NAT64 pairing:
+
+<Steps>
+  <Step title="DNS64 synthesis in mikrom-dns">
+    When a workload queries an external hostname that resolves only to `A` (IPv4) records, `mikrom-dns` synthesizes a `AAAA` response by prepending the NAT64 prefix (`64:ff9b::/96` by default) to the IPv4 address. The workload receives an IPv6 address it can use directly.
+  </Step>
+  <Step title="Traffic hits the NAT64 translator">
+    The workload sends packets to the synthesized `AAAA` address. On the worker's host bridge, `mikrom-agent` runs a singleton `tundra-nat64` process that intercepts these packets.
+  </Step>
+  <Step title="NAT64 translates to IPv4">
+    `tundra-nat64` strips the NAT64 prefix and re-sends the packet as a standard IPv4 packet to the real destination address, then translates the IPv4 reply back to IPv6 for the workload.
+  </Step>
+</Steps>
+
+<Note>
+  The `tundra-nat64` translator is started and managed by `mikrom-agent`, not `mikrom-dns`. DNS64 and NAT64 are complementary—DNS64 answers from `mikrom-dns` are what make the NAT64 translator effective. See the [Agent](/services/agent) page for details on the translator lifecycle.
+</Note>
+
+## Runtime Behavior
+
+- Zone records are held entirely in memory using `DashMap` for low-latency lookups.
+- On startup, the service subscribes to NATS and replays any relevant state before accepting queries.
+- Upstream queries (for names outside the `*.mikrom.internal.` zones) are forwarded to the resolvers listed in `UPSTREAM_DNS` in order.
+- External `AAAA` lookups use DNS64 synthesis when the upstream returns only `A` records.
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `NATS_URL` | `nats://localhost:4222` | NATS server URL for zone update subscriptions |
+| `UPSTREAM_DNS` | `2606:4700:4700::1111,2001:4860:4860::8888` | Ordered list of upstream resolvers (Cloudflare, Google) |
+| `UPSTREAM_DNS_TIMEOUT_SECS` | `5` | Timeout for upstream resolver connections |
+| `NATS_CONNECT_TIMEOUT_SECS` | `5` | Timeout for the initial NATS connection |
+| `NATS_BACKOFF_MAX_SECS` | `30` | Maximum backoff between NATS reconnect attempts |
+| `NAT64_PREFIX` | `64:ff9b::` | NAT64 prefix used to synthesize external `AAAA` records |
+| `NATS_SYS_IP` | — | Optional IPv6 address for system-zone exposure |
+| `ENABLE_TELEMETRY` | `true` | Enable OTLP export for traces and metrics |
+
+## Stack
+
+- **Rust 2024** — service runtime
+- **Hickory DNS** — DNS protocol implementation
+- **DashMap** — concurrent in-memory zone store
+- **async-nats** — NATS subscriptions for zone updates
+- **OpenTelemetry** — distributed tracing and metrics export
+
+## Validation: NAT64/DNS64 Smoke Test
+
+After deploying or changing the DNS64 configuration, run the smoke test checklist to confirm end-to-end IPv4 egress is working from inside a microVM:
+
+```bash
+# Refer to docs/nat64-dns64-smoke-checklist.md in the repository
+# Key steps:
+# 1. Confirm tundra-nat64 is running on the host bridge
+# 2. Query an IPv4-only external hostname through mikrom-dns
+# 3. Verify a synthesized AAAA answer is returned
+# 4. Ping the synthesized address from inside a microVM
+# 5. Confirm the packet appears at the real IPv4 destination
+```
+
+<Warning>
+  If `mikrom-dns` returns `NXDOMAIN` for an external hostname that should resolve, check that `UPSTREAM_DNS` is reachable from the host and that the upstream resolvers return `A` records for the queried name.
+</Warning>
+
+## Debian Package
+
+A Debian package is available for production deployments.
+
+```bash
+make deb-dns   # Build the .deb for mikrom-dns
+```
+
+## Local Development
+
+```bash
+cargo run -p mikrom-dns
+cargo nextest run -p mikrom-dns
+make ci-smoke
+make ci-fast
+```
+
+<Info>
+  Integration tests that exercise NATS subscriptions are opt-in. Run `make ci-external-tests` to include the ignored NATS integration suite in your test pass.
+</Info>

@@ -1,0 +1,158 @@
+---
+title: "mikrom-agent Configuration: Timeouts and Env Variables"
+sidebarTitle: "Agent Config"
+description: "Full environment variable reference for mikrom-agent, including NATS, Firecracker, and Cloud Hypervisor timeout tuning and observability settings."
+---
+
+`mikrom-agent` is the worker daemon that runs on each compute node. It manages microVM lifecycle for both Firecracker and Cloud Hypervisor, reports host metrics, and ships workload logs over NATS. All configuration is provided through environment variables — in Debian/systemd deployments these are loaded from `/etc/mikrom/agent.env`, while local development uses `.env` in the `mikrom-agent` directory.
+
+## NATS
+
+These variables control how the agent connects to NATS and recovers from transient failures. The circuit breaker prevents the agent from hammering a temporarily unavailable broker after repeated failures.
+
+<ParamField body="NATS_URL" type="string" required>
+  NATS server URL. Must match the `NATS_URL` configured in `mikrom-api` and `mikrom-scheduler`.  
+  Example: `nats://[::1]:4222`
+</ParamField>
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_NATS_CONNECT_TIMEOUT_SECS` | `5` | Timeout (seconds) for the initial NATS connection attempt. |
+| `AGENT_NATS_MAX_BACKOFF_SECS` | `60` | Maximum back-off duration (seconds) between NATS reconnection attempts. |
+| `AGENT_NATS_CIRCUIT_BREAKER_COOLDOWN_SECS` | `300` | Duration (seconds) the NATS circuit breaker stays open after repeated failures before attempting to reconnect. |
+
+---
+
+## Cloud Hypervisor
+
+The Cloud Hypervisor timeouts govern socket readiness detection, API communication, and the configure-VM retry loop. Increase these values on hosts with heavy I/O contention or slow storage backends.
+
+| Variable | Default | Description |
+|---|---|---|
+| `AGENT_CLOUD_HYPERVISOR_SOCKET_WAIT_TIMEOUT_SECS` | `10` | Maximum time to wait for the Cloud Hypervisor UNIX socket to appear after the process starts. |
+| `AGENT_CLOUD_HYPERVISOR_API_CONNECT_TIMEOUT_SECS` | `5` | TCP/socket connect timeout for Cloud Hypervisor API calls. |
+| `AGENT_CLOUD_HYPERVISOR_API_STATUS_TIMEOUT_SECS` | `30` | Timeout for receiving the HTTP status line in Cloud Hypervisor API responses. |
+| `AGENT_CLOUD_HYPERVISOR_API_HEADER_TIMEOUT_SECS` | `10` | Timeout for reading HTTP response headers from the Cloud Hypervisor API. |
+| `AGENT_CLOUD_HYPERVISOR_API_BODY_TIMEOUT_SECS` | `60` | Timeout for reading the full HTTP response body from the Cloud Hypervisor API. |
+| `AGENT_CLOUD_HYPERVISOR_CONFIGURE_CLIENT_TIMEOUT_SECS` | `5` | Overall client timeout for the VM configuration HTTP request. |
+| `AGENT_CLOUD_HYPERVISOR_CONFIGURE_REQUEST_TIMEOUT_SECS` | `6` | Per-request timeout during VM configuration (should be slightly greater than the client timeout). |
+| `AGENT_CLOUD_HYPERVISOR_CONFIGURE_BACKOFF_MAX_SECS` | `5` | Maximum back-off (seconds) between VM configuration retries. |
+
+---
+
+## Firecracker
+
+Firecracker timeouts cover socket readiness (both jailer and non-jailer paths), API communication, and process teardown. The agent also manages virtual filesystem (VFS) process lifecycle — `FC_VFS_*` timeouts control how long the agent waits when stopping or killing attached VFS processes.
+
+<Note>
+  `FC_SOCKET_WAIT_TIMEOUT_SECS` defaults to `120` seconds to accommodate the **non-jailer** boot path, which can take longer than the jailer path on cold starts. On hosts that always use the jailer (`USE_JAILER=true`), you may safely lower this value.
+</Note>
+
+| Variable | Default | Description |
+|---|---|---|
+| `FC_SOCKET_WAIT_TIMEOUT_SECS` | `120` | Maximum time to wait for the Firecracker UNIX socket to appear (non-jailer path). |
+| `FC_SOCKET_WAIT_CHROOT_SECS` | `10` | Maximum time to wait for the Firecracker socket inside the jailer chroot. |
+| `FC_API_CONNECT_TIMEOUT_SECS` | `2` | TCP/socket connect timeout for Firecracker API calls. |
+| `FC_API_STATUS_TIMEOUT_SECS` | `30` | Timeout for receiving the HTTP status line from the Firecracker API. |
+| `FC_API_HEADER_TIMEOUT_SECS` | `10` | Timeout for reading HTTP response headers from the Firecracker API. |
+| `FC_API_BODY_TIMEOUT_SECS` | `60` | Timeout for reading the full HTTP response body from the Firecracker API. |
+| `FC_PROCESS_TERMINATE_TIMEOUT_SECS` | `10` | Time to wait for the Firecracker process to exit after sending `SIGTERM`. |
+| `FC_PROCESS_KILL_TIMEOUT_SECS` | `2` | Time to wait after sending `SIGKILL` before declaring the process unresponsive. |
+| `FC_VFS_TERMINATE_TIMEOUT_SECS` | `5` | Time to wait for VFS helper processes to exit after `SIGTERM`. |
+| `FC_VFS_KILL_TIMEOUT_SECS` | `2` | Time to wait after `SIGKILL` for VFS helper processes before cleanup proceeds. |
+
+---
+
+## Observability
+
+`mikrom-agent` exports OpenTelemetry traces and metrics using the same variables as `mikrom-api`. See the [Observability configuration page](/configuration/observability) for a full setup guide.
+
+<Note>
+  On systemd deployments, load `DT_API_TOKEN` from `/etc/mikrom/dynatrace.env` rather than embedding it in `agent.env`. The systemd unit (`mikrom-agent.service`) includes `EnvironmentFile=-/etc/mikrom/dynatrace.env` so the file is loaded automatically if it exists. Create the file with the following content:
+
+  ```env
+  DT_API_TOKEN=your-dynatrace-api-token-here
+  ```
+
+  This keeps the token out of the main `agent.env` file and allows it to be managed separately (e.g. rotated by a secrets management tool without touching agent configuration).
+</Note>
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENABLE_TELEMETRY` | `true` | Enable OpenTelemetry trace and metric export. |
+| `DT_API_URL` | `http://[::1]:4318/api/v2/otlp` | Dynatrace (or local OTLP collector) ingest URL. |
+| `DT_API_TOKEN` | — | Dynatrace API token. Load from `/etc/mikrom/dynatrace.env` on systemd hosts. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://[::1]:4318/api/v2/otlp` | OTLP HTTP endpoint for trace and metric export. |
+| `LOG_FORMAT` | `json` | Log output format. `json` produces structured logs; any other value enables human-readable output. |
+
+---
+
+## Additional Runtime Variables
+
+The following variables control other aspects of agent runtime behaviour. They are read from `/etc/mikrom/agent.env` (or `.env` in local development).
+
+| Variable | Default | Description |
+|---|---|---|
+| `USE_TLS` | `false` | Enable TLS on the agent's listener. |
+| `CERTS_DIR` | `/certs/agent` | Directory containing TLS certificates when `USE_TLS=true`. |
+| `AGENT_HOSTNAME` | — | Hostname reported by this agent node. Auto-detected if unset. |
+| `HOST_ID` | — | Stable identifier for this host node. Auto-generated if unset. |
+| `BRIDGE_IP` | `fd00::1/64` | IPv6 address assigned to the host bridge interface used by microVMs. |
+| `USE_JAILER` | `true` | Run Firecracker microVMs inside the jailer sandbox. |
+| `JAILER_UID` | `1100` | UID the jailer drops to when creating the chroot. |
+| `JAILER_GID` | `1100` | GID the jailer drops to when creating the chroot. |
+| `JAILER_CHROOT_BASE` | `/srv/jailer` | Base directory for jailer chroot environments. |
+| `REGISTRY` | `registry.mikrom.spluca.org` | Container registry from which the agent pulls microVM images. |
+
+---
+
+## Full `.env` Example
+
+The following block can be used as a starting point for local development.
+
+```env
+# ── Core ──────────────────────────────────────────────────────────────────────
+NATS_URL=nats://[::1]:4222
+TEST_NATS_URL=nats://[::1]:4223
+
+# ── Networking ────────────────────────────────────────────────────────────────
+USE_TLS=false
+BRIDGE_IP=fd00::1/64
+CERTS_DIR=/certs/agent
+AGENT_HOSTNAME=
+HOST_ID=
+
+# ── NATS Timeouts ─────────────────────────────────────────────────────────────
+# AGENT_NATS_CONNECT_TIMEOUT_SECS=5
+# AGENT_NATS_MAX_BACKOFF_SECS=60
+# AGENT_NATS_CIRCUIT_BREAKER_COOLDOWN_SECS=300
+
+# ── Cloud Hypervisor Timeouts ─────────────────────────────────────────────────
+# AGENT_CLOUD_HYPERVISOR_SOCKET_WAIT_TIMEOUT_SECS=10
+# AGENT_CLOUD_HYPERVISOR_API_CONNECT_TIMEOUT_SECS=5
+# AGENT_CLOUD_HYPERVISOR_API_STATUS_TIMEOUT_SECS=30
+# AGENT_CLOUD_HYPERVISOR_API_HEADER_TIMEOUT_SECS=10
+# AGENT_CLOUD_HYPERVISOR_API_BODY_TIMEOUT_SECS=60
+# AGENT_CLOUD_HYPERVISOR_CONFIGURE_CLIENT_TIMEOUT_SECS=5
+# AGENT_CLOUD_HYPERVISOR_CONFIGURE_REQUEST_TIMEOUT_SECS=6
+# AGENT_CLOUD_HYPERVISOR_CONFIGURE_BACKOFF_MAX_SECS=5
+
+# ── Firecracker Timeouts ──────────────────────────────────────────────────────
+# FC_SOCKET_WAIT_TIMEOUT_SECS=120
+# FC_SOCKET_WAIT_CHROOT_SECS=10
+# FC_API_CONNECT_TIMEOUT_SECS=2
+# FC_API_STATUS_TIMEOUT_SECS=30
+# FC_API_HEADER_TIMEOUT_SECS=10
+# FC_API_BODY_TIMEOUT_SECS=60
+# FC_PROCESS_TERMINATE_TIMEOUT_SECS=10
+# FC_PROCESS_KILL_TIMEOUT_SECS=2
+# FC_VFS_TERMINATE_TIMEOUT_SECS=5
+# FC_VFS_KILL_TIMEOUT_SECS=2
+
+# ── Observability ─────────────────────────────────────────────────────────────
+ENABLE_TELEMETRY=true
+DT_API_URL=http://[::1]:4318/api/v2/otlp
+# DT_API_TOKEN=  ← on systemd hosts, set this in /etc/mikrom/dynatrace.env instead
+OTEL_EXPORTER_OTLP_ENDPOINT=http://[::1]:4318/api/v2/otlp
+LOG_FORMAT=json
+```

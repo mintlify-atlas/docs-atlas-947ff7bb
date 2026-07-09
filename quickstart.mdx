@@ -1,47 +1,281 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Quickstart: Deploy Your First App with Mikrom"
+sidebarTitle: "Quickstart"
+description: "Install Mikrom's CLI, spin up the local development stack, and deploy a containerized app into a microVM in under ten minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through standing up a local Mikrom development environment, installing the CLI, and deploying your first application into a microVM. By the end you will have a running deployment, a connected database, and a clear picture of the day-to-day workflow.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure the following tools are available on your machine:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Rust stable toolchain** — install via [rustup.rs](https://rustup.rs/)
+- **Docker and Docker Compose** — the local stack runs Postgres, NATS, BuildKit, and the observability suite as containers
+- **Node.js and pnpm** — required to run the SvelteKit dashboard (`mikrom-app`)
+- **Dagger CLI** — needed for the `make ci-*` build and validation profiles; see the [Dagger installation guide](https://docs.dagger.io/install)
 
-## Get started
+<Note>
+  Firecracker and Cloud Hypervisor are only required on production worker nodes. For local development the agent, scheduler, builder, and API all run as ordinary processes; no hypervisor is needed.
+</Note>
+
+## Local Development Setup
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
-
+  <Step title="Clone the repository">
     ```bash
-    npm install your-package
+    git clone https://github.com/mikronita/mikrom.git
+    cd mikrom
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Start the full infrastructure stack">
+    `make up-full` starts PostgreSQL, NATS, the BuildKit daemon, and the Grafana/Prometheus/Loki/Tempo observability suite as Docker Compose services in the background.
 
     ```bash
-    your-cli init
+    make up-full
+    ```
+
+    <Tip>
+      If you only need the core message broker and database without BuildKit or observability, run `make up` instead. You can bring up optional profiles later with `make up-buildkit` and `make up-observability`.
+    </Tip>
+  </Step>
+
+  <Step title="Launch the development session">
+    `make dev` opens (or attaches to) a tmux session named `mikrom` with separate windows for the API, scheduler, builder, and SvelteKit app. Each service starts with `cargo watch` for live reloading.
+
+    ```bash
+    make dev
+    ```
+
+    To run a single service in isolation instead:
+
+    ```bash
+    make run-api        # mikrom-api on port 5001
+    make run-scheduler  # mikrom-scheduler
+    make run-builder    # mikrom-builder
+    make run-agent      # mikrom-agent on port 5003
+    make run-router     # mikrom-router (Pingora)
+    make run-app        # SvelteKit dashboard on port 3001
+    ```
+
+    When you are done, stop the tmux session and tear down the Compose stack:
+
+    ```bash
+    make dev-stop   # close the tmux session only
+    make down-full  # stop and remove all containers
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Install the CLI">
+    The `install-cli` target compiles the `mikrom` binary in release mode and installs it to `~/.cargo/bin`.
 
     ```bash
-    your-cli start
+    make install-cli
+    ```
+
+    Verify the installation:
+
+    ```bash
+    mikrom --help
     ```
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Your First Deployment
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+<Steps>
+  <Step title="Log in">
+    Authenticate against the local API. The JWT is stored in the CLI configuration file.
+
+    ```bash
+    mikrom auth login --email user@example.com --password secret
+    ```
+
+    To check who you are logged in as at any time:
+
+    ```bash
+    mikrom auth whoami
+    ```
+  </Step>
+
+  <Step title="Create an application">
+    Register a new application by giving it a unique name and pointing it at a Git repository. The builder will clone this URL when a deployment is triggered.
+
+    ```bash
+    mikrom app create \
+      --name my-app \
+      --git-url https://github.com/user/my-app.git
+    ```
+
+    List all registered applications:
+
+    ```bash
+    mikrom app list
+    ```
+  </Step>
+
+  <Step title="Deploy the application">
+    Trigger a deployment. Mikrom clones the repository, builds an OCI image, schedules placement, and boots a microVM.
+
+    ```bash
+    mikrom app deploy \
+      --name my-app \
+      --cpu 2 \
+      --memory 1G
+    ```
+
+    **Resource presets** — the `--cpu` and `--memory` flags accept fixed values only:
+
+    | Resource | Allowed values | Default |
+    |---|---|---|
+    | CPU cores | `1`, `2`, `3`, `4` | `1` |
+    | Memory | `512M`, `1G`, `2G`, `4G` | `512M` |
+
+    <Note>
+      Omitting both flags deploys with the defaults of 1 vCPU and 512 MB RAM. You can also pass `--hypervisor firecracker` or `--hypervisor cloud-hypervisor` to select the VMM explicitly; the platform chooses a sensible default when the flag is omitted.
+    </Note>
+  </Step>
+
+  <Step title="Check deployment status">
+    List all active deployments across every application:
+
+    ```bash
+    mikrom deployment list
+    ```
+
+    For granular status of a specific running instance, supply the app name and job ID printed by the previous command:
+
+    ```bash
+    mikrom deployment status --app my-app --job-id <job-id>
+    ```
+  </Step>
+
+  <Step title="Manage scaling">
+    All applications scale to zero automatically after inactivity. You can also configure autoscaling thresholds or pin a fixed replica count:
+
+    ```bash
+    # Enable autoscaling with CPU and memory thresholds
+    mikrom app scale \
+      --name my-app \
+      --auto true \
+      --min 0 \
+      --max 3 \
+      --cpu 70 \
+      --mem 80
+
+    # Pin to exactly 2 replicas (disables autoscaling)
+    mikrom app scale --name my-app --replicas 2
+    ```
+  </Step>
+</Steps>
+
+## Working with Databases
+
+Mikrom provisions managed PostgreSQL databases through Neon. Databases run in Cloud Hypervisor-backed microVMs on the platform and default to PostgreSQL 16.
+
+<Steps>
+  <Step title="Create a database">
+    ```bash
+    mikrom db create orders
+    ```
+
+    You can customise the engine, version, and resources:
+
+    ```bash
+    mikrom db create orders \
+      --engine neon \
+      --version 16 \
+      --vcpus 1 \
+      --memory 1G \
+      --disk 2048
+    ```
+
+    List all databases in the current project:
+
+    ```bash
+    mikrom db list
+    ```
+  </Step>
+
+  <Step title="Retrieve connection details">
+    ```bash
+    mikrom db connection <database-id>
+    ```
+
+    This command returns:
+
+    - The SSH tunnel command to reach the database VM
+    - The `psql` connection command to use through the tunnel
+    - Full connection metadata in JSON when you pass `--output json`
+
+    ```bash
+    mikrom db connection <database-id> --output json
+    ```
+  </Step>
+</Steps>
+
+## Rollbacks and Lifecycle Operations
+
+<Steps>
+  <Step title="Activate a previous deployment">
+    Roll back to any earlier deployment by its ID:
+
+    ```bash
+    mikrom app activate \
+      --app my-app \
+      --deployment-id <deployment-id>
+    ```
+
+    Show the full deployment history for an application:
+
+    ```bash
+    mikrom app deployments --name my-app
+    ```
+  </Step>
+
+  <Step title="Stop, pause, and resume instances">
+    ```bash
+    mikrom deployment stop   --app my-app --job-id <job-id>
+    mikrom deployment pause  --app my-app --job-id <job-id>
+    mikrom deployment resume --app my-app --job-id <job-id>
+    ```
+  </Step>
+</Steps>
+
+## Running the Test Suite
+
+```bash
+make test              # Unit tests only — no database required
+make test-integration  # Integration tests — starts PostgreSQL and NATS via Docker
+make test-all          # Full suite (unit + integration)
+```
+
+For the Dagger-backed CI profiles, ordered from fastest to most comprehensive:
+
+```bash
+make ci-smoke   # fmt + clippy + frontend validation
+make ci-fast    # smoke + workspace tests with ephemeral Postgres and NATS
+make ci-full    # fast + release build + eBPF validation
+```
+
+<Tip>
+  Use `make ci-smoke` during daily development for the fastest feedback loop. Run `make ci-fast` before pushing changes that touch shared Rust code or service contracts.
 </Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand how the control plane, traffic plane, and platform services fit together.
+  </Card>
+  <Card title="CLI Overview" icon="terminal" href="/cli/overview">
+    Explore every command group: auth, app, deployment, db, volume, project, and PAT.
+  </Card>
+  <Card title="Deployment Scaling" icon="arrow-up-right-dots" href="/deployment/scaling">
+    Configure autoscaling thresholds, replica counts, and scale-to-zero behaviour.
+  </Card>
+  <Card title="Local Dev Setup" icon="laptop-code" href="/development/local-setup">
+    Deep-dive into tmux sessions, individual service targets, and environment configuration.
+  </Card>
+</CardGroup>

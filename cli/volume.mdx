@@ -1,0 +1,252 @@
+---
+title: "mikrom volume: Persistent Block Storage Management"
+sidebarTitle: "volume"
+description: "Create, attach, detach, and snapshot persistent block volumes for Mikrom microVM workloads. All volume sizes are specified in MiB."
+---
+
+The `mikrom volume` group manages persistent block storage that survives across microVM restarts and redeployments. Volumes are attached directly to application VMs at a specified mount path and support three access modes: ReadWriteOnce (exclusive to one instance), ReadWriteMany (shared across instances), and ReadOnlyMany (read-shared across instances). Snapshots let you capture and restore volume state at any point in time.
+
+## mikrom volume list
+
+List all persistent volumes in the current project, optionally filtered to a specific application.
+
+```bash
+mikrom volume list [--app <name>]
+```
+
+<ParamField query="--app" type="string">
+  Filter the listing to volumes attached to, or associated with, this application name.
+</ParamField>
+
+**Example — list all volumes**
+
+```bash
+mikrom volume list
+```
+
+**Example — filter by app**
+
+```bash
+mikrom volume list --app my-api
+```
+
+---
+
+## mikrom volume create
+
+Create a new persistent volume with a display name and a size in MiB. The volume is created unattached and must be explicitly attached to an application before it is accessible inside a VM.
+
+```bash
+mikrom volume create --name <name> --size <MiB>
+```
+
+<ParamField query="--name" type="string" required>
+  Human-readable display name for the volume (e.g. `uploads-prod`).
+</ParamField>
+
+<ParamField query="--size" type="number" required>
+  Requested volume size, expressed in **MiB** (mebibytes).
+</ParamField>
+
+<Note>
+  The `--size` flag is in **MiB**. To create a 20 GiB volume, pass `--size 20480`. There is no default — you must specify the size explicitly.
+</Note>
+
+**Example — create a 10 GiB volume**
+
+```bash
+mikrom volume create --name uploads-prod --size 10240
+```
+
+---
+
+## mikrom volume attach
+
+Attach an existing volume to an application at a specified path inside the VM. You can control the access mode to allow exclusive, shared-write, or read-only access.
+
+```bash
+mikrom volume attach --app <name> --volume-id <id> --mount <path> [--mode 0|1|2]
+```
+
+<ParamField query="--app" type="string" required>
+  Name of the application to attach the volume to.
+</ParamField>
+
+<ParamField query="--volume-id" type="string" required>
+  ID of the volume to attach.
+</ParamField>
+
+<ParamField query="--mount" type="string" required>
+  Absolute path inside the VM where the volume will be mounted (e.g. `/data`).
+</ParamField>
+
+<ParamField query="--mode" type="number" default="0">
+  Access mode for the volume:
+  - `0` — **RWO** ReadWriteOnce: mounted read-write by a single instance (default).
+  - `1` — **RWX** ReadWriteMany: mounted read-write by multiple instances simultaneously.
+  - `2` — **ROX** ReadOnlyMany: mounted read-only by multiple instances simultaneously.
+</ParamField>
+
+**Example — attach with default RWO mode**
+
+```bash
+mikrom volume attach --app my-api --volume-id vol-abc123 --mount /data
+```
+
+**Example — attach with shared write access**
+
+```bash
+mikrom volume attach --app my-api --volume-id vol-abc123 --mount /shared --mode 1
+```
+
+---
+
+## mikrom volume detach
+
+Detach a volume from an application. The volume's data is preserved and the volume can be re-attached to the same or a different application afterwards.
+
+```bash
+mikrom volume detach --app <name> --volume-id <id>
+```
+
+<ParamField query="--app" type="string" required>
+  Name of the application to detach the volume from.
+</ParamField>
+
+<ParamField query="--volume-id" type="string" required>
+  ID of the volume to detach.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom volume detach --app my-api --volume-id vol-abc123
+```
+
+---
+
+## mikrom volume snapshot
+
+Create a named snapshot of a volume's current state. Snapshots are point-in-time copies that can be used to restore the volume later.
+
+```bash
+mikrom volume snapshot --volume-id <id> --name <name>
+```
+
+<ParamField query="--volume-id" type="string" required>
+  ID of the volume to snapshot.
+</ParamField>
+
+<ParamField query="--name" type="string" required>
+  Descriptive name for the snapshot (e.g. `before-schema-change`).
+</ParamField>
+
+**Example**
+
+```bash
+mikrom volume snapshot --volume-id vol-abc123 --name before-schema-change
+```
+
+---
+
+## mikrom volume restore
+
+Restore a volume to the state captured in a named snapshot. All data written after the snapshot was taken will be lost.
+
+```bash
+mikrom volume restore --volume-id <id> --snapshot <name>
+```
+
+<ParamField query="--volume-id" type="string" required>
+  ID of the volume to restore.
+</ParamField>
+
+<ParamField query="--snapshot" type="string" required>
+  Name of the snapshot to restore from.
+</ParamField>
+
+<Warning>
+  Restoring a volume is **irreversible**. All data written to the volume after the selected snapshot was created will be permanently overwritten. Take a new snapshot first if you need to preserve the current state.
+</Warning>
+
+**Example**
+
+```bash
+mikrom volume restore --volume-id vol-abc123 --snapshot before-schema-change
+```
+
+---
+
+## mikrom volume snapshots list
+
+List all snapshots for a specific volume.
+
+```bash
+mikrom volume snapshots list --volume-id <id>
+```
+
+<ParamField query="--volume-id" type="string" required>
+  ID of the volume whose snapshots you want to list.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom volume snapshots list --volume-id vol-abc123
+```
+
+---
+
+## mikrom volume snapshots delete
+
+Delete a volume snapshot by its snapshot ID. Prompts for confirmation unless `--yes` is passed.
+
+```bash
+mikrom volume snapshots delete --snapshot-id <id> [--yes]
+```
+
+<ParamField query="--snapshot-id" type="string" required>
+  ID of the snapshot to delete.
+</ParamField>
+
+<ParamField query="--yes" type="boolean" default="false">
+  Skip the interactive confirmation prompt.
+</ParamField>
+
+<Warning>
+  Deleting a snapshot is **irreversible**. Once removed, you cannot restore the volume to the state that snapshot represented.
+</Warning>
+
+**Example**
+
+```bash
+mikrom volume snapshots delete --snapshot-id snap-xyz789 --yes
+```
+
+---
+
+## mikrom volume delete
+
+Permanently delete a volume and all data stored in it. Prompts for confirmation unless `--yes` is provided.
+
+```bash
+mikrom volume delete --volume-id <id> [--yes]
+```
+
+<ParamField query="--volume-id" type="string" required>
+  ID of the volume to delete.
+</ParamField>
+
+<ParamField query="--yes" type="boolean" default="false">
+  Skip the interactive confirmation prompt.
+</ParamField>
+
+<Warning>
+  Deleting a volume is **irreversible**. All data stored in the volume — including any snapshots associated with it — will be permanently destroyed. Detach the volume from any application before deleting it.
+</Warning>
+
+**Example**
+
+```bash
+mikrom volume delete --volume-id vol-abc123 --yes
+```

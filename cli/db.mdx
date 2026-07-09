@@ -1,0 +1,315 @@
+---
+title: "mikrom db: PostgreSQL Database Management Commands"
+sidebarTitle: "db"
+description: "Manage PostgreSQL databases on Mikrom with mikrom db. Create Neon-backed instances, inspect connections, manage branches, and take or restore snapshots."
+---
+
+The `mikrom db` group gives you full lifecycle control over PostgreSQL databases provisioned through Neon and hosted in Cloud Hypervisor–backed microVMs on the Mikrom platform. You can create databases with custom resource allocations, retrieve tunnel-ready connection strings, manage Neon branches, and take point-in-time snapshots — all from the command line.
+
+## mikrom db list
+
+List all databases in the current project context.
+
+```bash
+mikrom db list
+```
+
+**Example output**
+
+```
+ID           NAME       ENGINE  VERSION  STATUS
+db-a1b2c3   orders     neon    16       running
+db-d4e5f6   analytics  neon    16       running
+```
+
+---
+
+## mikrom db create
+
+Create a new PostgreSQL database. Defaults to a Neon-backed engine running PostgreSQL 16 with 1 vCPU, 512 MiB of RAM, and 1024 MiB of disk space.
+
+```bash
+mikrom db create <name> [--engine <engine>] [--version <version>] \
+  [--vcpus <n>] [--memory <size>] [--disk <MiB>] [--settings <key=value>...]
+```
+
+<ParamField path="name" type="string" required>
+  Unique display name for the database within the current project.
+</ParamField>
+
+<ParamField query="--engine" type="string" default="neon">
+  Database engine. Currently supported: `neon`.
+</ParamField>
+
+<ParamField query="--version" type="number" default="16">
+  PostgreSQL major version to provision (e.g. `16`).
+</ParamField>
+
+<ParamField query="--vcpus" type="number" default="1">
+  Number of CPU cores to allocate. Accepted values: `1`, `2`, `3`, `4`.
+</ParamField>
+
+<ParamField query="--memory" type="string" default="512M">
+  Memory to allocate. Accepted values: `512M`, `1G`, `2G`, `4G`.
+</ParamField>
+
+<ParamField query="--disk" type="number" default="1024">
+  Disk size for the database volume, expressed in MiB.
+</ParamField>
+
+<ParamField query="--settings" type="string[]">
+  One or more `key=value` pairs forwarded as database engine settings, e.g. `--settings max_connections=200`.
+</ParamField>
+
+<Note>
+  The `--disk` flag is specified in **MiB** (mebibytes). The default of `1024` equals 1 GiB. To provision a 10 GiB disk, pass `--disk 10240`.
+</Note>
+
+**Example — minimal create**
+
+```bash
+mikrom db create orders
+```
+
+**Example — custom resources**
+
+```bash
+mikrom db create analytics \
+  --vcpus 2 \
+  --memory 2G \
+  --disk 10240 \
+  --settings max_connections=500
+```
+
+---
+
+## mikrom db delete
+
+Delete a database by its name or ID. Prompts for confirmation unless `--yes` is supplied.
+
+```bash
+mikrom db delete <id> [--yes]
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database to delete.
+</ParamField>
+
+<ParamField query="--yes" type="boolean" default="false">
+  Skip the interactive confirmation prompt.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db delete db-a1b2c3 --yes
+```
+
+---
+
+## mikrom db info
+
+Retrieve full details about a single database, including its engine version, resource allocation, status, and internal network address.
+
+```bash
+mikrom db info <id>
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db info orders
+```
+
+---
+
+## mikrom db connection
+
+Show the connection details required to reach a database from your local machine. The command returns:
+
+- An **SSH tunnel** command that forwards a local port through the platform's secure tunnel to the database VM.
+- A **psql** command preconfigured to connect through that tunnel.
+- A **JSON** representation of the same metadata when `--output json` is passed.
+
+```bash
+mikrom db connection <id> [--output table|json]
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database.
+</ParamField>
+
+<ParamField query="--output" type="string" default="table">
+  Output format. Use `json` for machine-readable output.
+</ParamField>
+
+**Example — table output (default)**
+
+```bash
+mikrom db connection orders
+```
+
+```
+SSH Tunnel Command:
+  ssh -N -L 5432:db-a1b2c3.internal:5432 tunnel@edge.mikrom.io
+
+psql Command:
+  psql "host=localhost port=5432 dbname=neondb user=neon_user sslmode=disable"
+```
+
+**Example — JSON output**
+
+```bash
+mikrom db connection orders --output json
+```
+
+```json
+{
+  "ssh_tunnel": "ssh -N -L 5432:db-a1b2c3.internal:5432 tunnel@edge.mikrom.io",
+  "psql": "psql \"host=localhost port=5432 dbname=neondb user=neon_user sslmode=disable\"",
+  "host": "db-a1b2c3.internal",
+  "port": 5432,
+  "database": "neondb",
+  "user": "neon_user"
+}
+```
+
+<Tip>
+  Run the SSH tunnel command in one terminal tab and keep it open, then run the psql command in a second tab to connect through the forwarded port.
+</Tip>
+
+---
+
+## mikrom db branches
+
+List all Neon branches for a database. Neon's branching model lets you create instant copy-on-write clones of your database for development or testing.
+
+```bash
+mikrom db branches <id>
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the Neon-backed database.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db branches orders
+```
+
+---
+
+## mikrom db backup
+
+Display backup configuration and status details for a database.
+
+```bash
+mikrom db backup <id>
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db backup orders
+```
+
+---
+
+## mikrom db snapshots
+
+List all snapshots that have been taken for a database.
+
+```bash
+mikrom db snapshots <id>
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db snapshots orders
+```
+
+---
+
+## mikrom db snapshot-create
+
+Create a named snapshot of a database's current state. Snapshots capture the full disk image of the database VM and can be used for point-in-time restores.
+
+```bash
+mikrom db snapshot-create <id> <name>
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  Descriptive name for the snapshot (e.g. `pre-migration-v2`).
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db snapshot-create orders pre-migration-v2
+```
+
+---
+
+## mikrom db snapshot-restore
+
+Restore a database to the state captured in a named snapshot. This operation replaces the current database disk with the snapshot image.
+
+```bash
+mikrom db snapshot-restore <id> <snapshot>
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database.
+</ParamField>
+
+<ParamField path="snapshot" type="string" required>
+  Name of the snapshot to restore from.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db snapshot-restore orders pre-migration-v2
+```
+
+---
+
+## mikrom db snapshot-delete
+
+Permanently delete a named snapshot for a database.
+
+```bash
+mikrom db snapshot-delete <id> <snapshot>
+```
+
+<ParamField path="id" type="string" required>
+  Name or ID of the database.
+</ParamField>
+
+<ParamField path="snapshot" type="string" required>
+  Name of the snapshot to delete.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom db snapshot-delete orders pre-migration-v2
+```

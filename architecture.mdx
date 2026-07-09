@@ -1,0 +1,146 @@
+---
+title: "Mikrom Architecture: Services, Flow, and Coordination"
+sidebarTitle: "Architecture"
+description: "A deep-dive into Mikrom's control plane, traffic plane, and platform services — covering request flow, NATS coordination, and per-service responsibilities."
+---
+
+Mikrom is composed of focused, independently deployable Rust services that coordinate over NATS and share state through PostgreSQL. The platform splits cleanly into three planes: a **control plane** that manages application lifecycle from Git commit to running microVM, a **traffic plane** that carries live user requests to those microVMs, and a set of **platform services** that provide mesh networking, internal DNS, and the guest boot environment. Understanding which plane each service belongs to is the fastest way to reason about a deployment issue or trace a request end-to-end.
+
+## Request Flow
+
+When a user or operator triggers a deployment, the request travels through the control plane from front-end to microVM in a deterministic sequence. External user traffic, by contrast, never touches the control plane — it enters through `mikrom-router` and is routed directly to app microVMs over the WireGuard mesh.
+
+```text
+User / CLI
+   |
+   v
+mikrom-app / mikrom-cli
+   |
+   v
+ mikrom-api
+   |\
+   | \--> mikrom-builder -> OCI image -> registry
+   |
+   \----> mikrom-scheduler -> mikrom-agent -> microVMs
+
+External traffic -> mikrom-router -> app microVMs
+```
+
+### Control Plane Path
+
+1. **User or CLI** — an operator opens `mikrom-app` in a browser or runs `mikrom` from the terminal.
+2. **mikrom-app / mikrom-cli** — the SvelteKit dashboard and the Rust CLI both call `mikrom-api` over HTTP for all auth, app lifecycle, deployments, secrets, and database provisioning operations.
+3. **mikrom-api** — the control plane receives the request, persists state to PostgreSQL, and fans out commands over NATS. For a new deployment it coordinates two downstream paths in parallel:
+   - **mikrom-builder** — receives the Git URL and build config via NATS, clones the repository, runs the BuildKit-powered source-to-image pipeline, and pushes the resulting OCI image to the registry.
+   - **mikrom-scheduler** — receives the placement request, scores available workers, selects the best host, and dispatches a create-VM command to the chosen **mikrom-agent**.
+4. **mikrom-agent** — the worker daemon on the target node receives the command, provisions any required storage and network interfaces, and calls the Firecracker or Cloud Hypervisor API to boot the microVM running the application's OCI image.
+
+### Traffic Plane Path
+
+External HTTP/HTTPS traffic enters through **mikrom-router** — a Pingora-based reverse proxy. The router holds its own TLS state (certificates managed via ACME), reads routing rules from PostgreSQL, and forwards requests to app microVMs over the WireGuard mesh. The control plane is never in the critical path for live traffic.
+
+## Service Responsibilities
+
+The following table lists every service in the Mikrom workspace, its primary role, what it consumes as input, and what it produces or depends on:
+
+| Service | Purpose | Primary Inputs | Primary Outputs / Dependencies |
+|---|---|---|---|
+| `mikrom-app` | Operator dashboard | Browser, `API_UPSTREAM_URL` | Calls `mikrom-api` |
+| `mikrom-cli` | Terminal client | User commands, config file | Calls `mikrom-api` |
+| `mikrom-api` | Control plane | HTTP requests, PostgreSQL, NATS | Coordinates builder, scheduler, databases |
+| `mikrom-builder` | Build service | Git repo, build config, NATS | OCI image, registry push |
+| `mikrom-scheduler` | Placement engine | Worker metrics, NATS, DB state | Worker assignment, agent coordination |
+| `mikrom-agent` | Worker daemon | Scheduler commands, host access, NATS | MicroVM lifecycle, logs, metrics |
+| `mikrom-router` | Traffic ingress | External traffic, PostgreSQL, NATS, WireGuard | Routes to app microVMs |
+| `mikrom-network` | Mesh networking | Host identity, NATS | WireGuard peer state and routes |
+| `mikrom-dns` | Internal DNS | NATS events, upstream resolvers | Internal name resolution, DNS64 answers |
+| `mikrom-proto` | Shared contracts | Protobuf definitions | Generated Rust types for internal comms |
+| `mikrom-init` | MicroVM boot binary | VM boot environment | Starts the workload runtime inside the VM |
+| `mikrom-agent-ebpf` | eBPF payload | Agent build pipeline | Host-side network / data-plane support |
+| `ci` | Local CI runner | Workspace source, Docker, Dagger | Validation, image builds, publish flows |
+
+## Platform Services
+
+Platform services sit alongside the control and traffic planes, providing the networking substrate and guest boot environment that all microVMs depend on.
+
+### mikrom-network (WireGuard Mesh)
+
+`mikrom-network` maintains the WireGuard mesh and host identity coordination. It subscribes to NATS events to learn about new worker registrations and peer changes, then pushes the correct WireGuard peer configuration to each host. This decoupling means the mesh topology can evolve independently of workload placement decisions made by `mikrom-scheduler`.
+
+### mikrom-dns (Internal DNS + DNS64)
+
+`mikrom-dns` serves internal name resolution for platform services, worker nodes, and tenant resources. It also synthesises DNS64 responses for external hostnames when the platform is operating in IPv6-only mode with NAT64 translation at the host bridge. Like `mikrom-network`, it listens for NATS events rather than polling, so new workloads and service registrations propagate to DNS in near-real-time.
+
+### mikrom-init (MicroVM Boot Binary)
+
+`mikrom-init` is a small Zig-built binary embedded inside every microVM image. It runs as PID 1 inside the guest, sets up the workload runtime environment, and hands off to the application process. Because it is compiled with Zig for a known target, it has no dynamic linking dependencies and boots in milliseconds.
+
+### mikrom-agent-ebpf (eBPF Data Plane)
+
+`mikrom-agent-ebpf` is the compiled eBPF payload that `mikrom-agent` loads into the host kernel. It handles host-side network packet processing and collects low-overhead data-plane metrics without adding latency to the fast path. The shared types between the agent and its eBPF program live in `mikrom-agent-ebpf-common`.
+
+## Dependency Graph
+
+```
+mikrom-app        → mikrom-api
+mikrom-cli        → mikrom-api
+
+mikrom-api        → PostgreSQL, NATS
+                  → mikrom-builder    (via NATS)
+                  → mikrom-scheduler  (via NATS)
+                  → Neon              (database provisioning, optional)
+
+mikrom-builder    → NATS, BuildKit, OCI registry
+
+mikrom-scheduler  → NATS
+                  → mikrom-agent      (via NATS)
+
+mikrom-agent      → NATS, Firecracker / Cloud Hypervisor
+                  → mikrom-init       (embedded in VM image)
+                  → mikrom-network    (WireGuard host setup)
+                  → mikrom-dns        (DNS64 for external egress)
+                  → mikrom-agent-ebpf (eBPF payload)
+
+mikrom-router     → PostgreSQL, NATS, WireGuard tooling
+
+mikrom-network    → NATS, host identity
+mikrom-dns        → NATS, upstream DNS resolvers
+```
+
+## Coordination Notes
+
+### NATS as the Event Bus
+
+Control-plane state originates in `mikrom-api` and is fanned out over NATS to the builder, scheduler, and worker services. No service polls `mikrom-api` directly — each subscribes to the NATS subjects it owns. This gives the platform two important properties:
+
+- **Loose coupling:** `mikrom-builder` and `mikrom-scheduler` can restart independently without blocking `mikrom-api` from accepting new requests.
+- **Replay resilience:** NATS JetStream consumers allow downstream services to catch up on missed events after a restart without losing work in flight.
+
+### Scheduler Is Not a Router
+
+`mikrom-scheduler` is responsible only for placement decisions — choosing which worker node should host a given workload. It has no knowledge of routing rules, TLS certificates, or DNS records. Those concerns belong exclusively to `mikrom-router` and `mikrom-dns` respectively, so ingress configuration and name resolution can evolve without touching the placement engine.
+
+### Router Owns TLS State
+
+`mikrom-router` is the sole owner of TLS certificate storage and ACME state. `mikrom-api` does track ACME mode and reissue flags for the managed platform hostnames (`api.mikrom.spluca.org`, `dashboard.mikrom.spluca.org`), but the actual certificate material and traffic-plane routing tables live in tables owned by the router.
+
+### Network and DNS Are Decoupled from Scheduling
+
+`mikrom-network` and `mikrom-dns` are deliberately separated from `mikrom-scheduler` so that host identity and internal name resolution can be updated — for example, when a worker's WireGuard keypair rotates — without triggering a placement re-evaluation. Both services consume the same NATS event stream as the scheduler but act only on the events they care about.
+
+## Service Discovery for Key Services
+
+<CardGroup cols={2}>
+  <Card title="Router" icon="route" href="/services/router">
+    Explore how `mikrom-router` handles ACME certificate provisioning, health checks, and WireGuard-aware traffic routing.
+  </Card>
+  <Card title="Networking" icon="network-wired" href="/services/networking">
+    Learn how `mikrom-network` builds and maintains the WireGuard mesh across all worker nodes.
+  </Card>
+  <Card title="DNS" icon="magnifying-glass" href="/services/dns">
+    Understand how `mikrom-dns` resolves internal names, synthesises DNS64 responses, and propagates records via NATS.
+  </Card>
+  <Card title="Agent" icon="server" href="/services/agent">
+    See how `mikrom-agent` manages microVM lifecycle, streams logs and metrics, and integrates with the eBPF data plane.
+  </Card>
+</CardGroup>

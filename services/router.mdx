@@ -1,0 +1,166 @@
+---
+title: "Mikrom Router: Pingora-Based Ingress with Automatic TLS"
+sidebarTitle: "Router"
+description: "mikrom-router is the Pingora-powered ingress that terminates TLS, manages ACME certificates, and routes external traffic to app microVMs over WireGuard."
+---
+
+`mikrom-router` is the traffic plane for the Mikrom platform. Built on Cloudflare's [Pingora](https://github.com/cloudflare/pingora) framework in Rust, it sits at the edge of every deployment: accepting inbound connections on ports 80 and 443, terminating TLS, handling ACME certificate lifecycle, and forwarding requests to the correct app microVM through the WireGuard mesh. Route state is persisted in PostgreSQL and kept current via NATS events published by `mikrom-api` whenever deployment state changes.
+
+## Responsibilities
+
+<CardGroup cols={2}>
+  <Card title="Ingress Routing" icon="route">
+    Proxies inbound HTTP and HTTPS traffic to the correct app microVM. Maintains a live route table updated over NATS.
+  </Card>
+  <Card title="TLS & ACME" icon="lock">
+    Manages the full certificate lifecycle for both app hostnames and managed platform hostnames using Let's Encrypt.
+  </Card>
+  <Card title="Health Checks" icon="heart-pulse">
+    Exposes liveness, readiness, dependency, and control-plane health endpoints for orchestration and monitoring.
+  </Card>
+  <Card title="WireGuard Integration" icon="shield">
+    Reaches app microVMs through the WireGuard mesh managed by `mikrom-network`. Requires `CAP_NET_ADMIN`.
+  </Card>
+</CardGroup>
+
+## Traffic Flow
+
+Every external request travels through the following path before reaching an application:
+
+<Steps>
+  <Step title="Client connects to the router">
+    The client sends an HTTPS request to the router on port 443 (or HTTP on port 80 for ACME challenge responses).
+  </Step>
+  <Step title="TLS termination">
+    Pingora terminates TLS using the certificate stored in `tls_certificates` in PostgreSQL. Certificates are issued and renewed automatically via the ACME worker.
+  </Step>
+  <Step title="Route lookup">
+    The router looks up the target microVM for the requested hostname from its in-memory route table, which is reconciled from PostgreSQL and kept live via NATS events.
+  </Step>
+  <Step title="WireGuard forwarding">
+    The request is forwarded over the WireGuard mesh to the app microVM's IPv6 address, where the workload is listening.
+  </Step>
+</Steps>
+
+## ACME Certificate Management
+
+The router owns all TLS certificate state. Certificates are provisioned via ACME (Let's Encrypt) and renewed automatically.
+
+<Tabs>
+  <Tab title="App Hostnames">
+    App hostnames use the ACME environment controlled by the `ACME_STAGING` flag. Set it to `true` during development to avoid Let's Encrypt rate limits.
+
+    ```bash
+    ACME_STAGING=true   # Use Let's Encrypt staging (development)
+    ACME_STAGING=false  # Use Let's Encrypt production (default for live deployments)
+    ```
+  </Tab>
+  <Tab title="Managed Hostnames">
+    The managed platform hostnames `api.mikrom.spluca.org` and `dashboard.mikrom.spluca.org` always use the Let's Encrypt **production** environment, regardless of the `ACME_STAGING` setting. Their desired ACME mode is stored in `acme_managed_domains`.
+  </Tab>
+</Tabs>
+
+<Note>
+  `mikrom-api` co-owns the ACME worker for managed hostnames. However, the TLS storage tables—including `tls_certificates`—are owned exclusively by `mikrom-router`. The API writes the desired state; the router executes the issuance.
+</Note>
+
+## Route Reconciliation via NATS
+
+The router subscribes to NATS events published by `mikrom-api`. Whenever a deployment is created, updated, or removed, the API publishes a route-change event and the router updates its in-memory route table without a restart.
+
+```text
+mikrom-api  ──NATS event──►  mikrom-router  ──WireGuard──►  app microVM
+```
+
+This keeps the routing data plane eventually consistent with the control plane state in PostgreSQL.
+
+## Health Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health/live` | Liveness — confirms the process is running |
+| `GET /health/ready` | Readiness — confirms all subsystems are ready to serve traffic |
+| `GET /health/deps` | Dependency check — reports PostgreSQL and NATS reachability |
+| `GET /health/control-plane` | Control-plane sync status |
+
+## Configuration
+
+The router reads all configuration from environment variables. The following are the most commonly tuned variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | required | PostgreSQL connection string for traffic-plane state |
+| `NATS_URL` | required | NATS server URL for route-update events |
+| `ROUTER_TLS_HOSTNAME` | required | Primary hostname the router serves TLS for |
+| `ACME_EMAIL` | required | Contact email registered with Let's Encrypt |
+| `ACME_STAGING` | `false` | `true` to use Let's Encrypt staging for app hostnames |
+| `WIREGUARD_PORT` | `51823` | WireGuard listen port for the mesh |
+| `ROUTER_THREADS` | — | Number of Pingora worker threads |
+| `RPS_LIMIT` | — | Optional requests-per-second rate limit |
+| `API_UPSTREAM_TARGETS` | — | Override targets for `api.mikrom.spluca.org` proxy |
+| `WEB_UPSTREAM_TARGETS` | — | Override targets for the dashboard proxy |
+
+### Timeout Tuning
+
+| Variable | Default | Description |
+|---|---|---|
+| `STARTUP_CONNECT_TIMEOUT_SECS` | `5` | Connection timeout during startup checks |
+| `DOWNSTREAM_REQUEST_TIMEOUT_SECS` | `10` | Time to read the full downstream request |
+| `DOWNSTREAM_RESPONSE_TIMEOUT_SECS` | `30` | Time to send the full downstream response |
+| `UPSTREAM_CONNECT_TIMEOUT_SECS` | `5` | Time to establish an upstream connection |
+| `UPSTREAM_READ_TIMEOUT_SECS` | `30` | Time to read an upstream response |
+| `UPSTREAM_WRITE_TIMEOUT_SECS` | `30` | Time to write an upstream request |
+| `UPSTREAM_IDLE_TIMEOUT_SECS` | `60` | Idle timeout for upstream keep-alive connections |
+| `ROUTE_WAIT_TIMEOUT_SECS` | `30` | Time to wait for a route to become available |
+
+## Built-in Platform Proxies
+
+The packaged configuration includes two hard-wired upstreams that are always active:
+
+| Hostname | Upstream | Port |
+|---|---|---|
+| `api.mikrom.spluca.org` | `mikrom-api` (IPv6) | `5001` |
+| `mikrom.spluca.org` (dashboard) | `mikrom-app` frontend (IPv6) | `5173` |
+
+Both hostnames require production-grade TLS certificates issued through the ACME worker in `mikrom-api`.
+
+## Stack
+
+```toml
+# mikrom-router/Cargo.toml (key dependencies)
+pingora          = "0.8.1"   # Core proxy engine
+async-nats       = "..."     # Route-update subscriptions
+sqlx             = "0.8.6"   # PostgreSQL state persistence
+openssl          = "0.10.80" # TLS and ACME cryptography
+mikrom-network   = { path = "../mikrom-network" }  # WireGuard mesh
+```
+
+## Debian Package
+
+A Debian package is available for production deployments. The packaged unit depends on `wireguard-tools` and runs as a systemd service.
+
+```bash
+make deb-router   # Build the .deb for mikrom-router
+```
+
+The package installs:
+- `/usr/bin/mikrom-router`
+- `/lib/systemd/system/mikrom-router.service`
+- `/etc/mikrom/router.env` (configuration template)
+
+<Tip>
+  On systemd deployments, load `DT_API_TOKEN` from `/etc/mikrom/dynatrace.env` rather than embedding it in `router.env`. A template is provided at `debian/etc/mikrom/dynatrace.env.example`.
+</Tip>
+
+## Local Development
+
+```bash
+make run-router        # Start the router against local Postgres and NATS
+make ci-smoke          # fmt + clippy validation
+make ci-fast           # Full workspace test suite with ephemeral Postgres and NATS
+cargo test -p mikrom-router
+```
+
+<Info>
+  Integration tests that require PostgreSQL use an ephemeral `TestDb` helper. They default to `postgres://mikrom:mikrom_password@localhost:5432/mikrom_router_test` when `TEST_DATABASE_URL` is not set.
+</Info>

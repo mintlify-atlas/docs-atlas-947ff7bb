@@ -1,0 +1,154 @@
+---
+title: "mikrom-builder: Source-to-OCI Container Image Build Engine"
+sidebarTitle: "Builder"
+description: "mikrom-builder clones Git repos, auto-detects the app stack, builds OCI images with BuildKit, and pushes results to the configured registry over NATS."
+---
+
+`mikrom-builder` is the build engine for the Mikrom platform. It listens on NATS for build requests from `mikrom-api`, clones the target Git repository into a temporary workspace, detects the application stack (or falls back to a provided Dockerfile), builds an OCI-compliant container image using BuildKit, and pushes the result to the configured registry. Build logs and status updates are reported back over NATS so the dashboard and CLI can stream progress in real time.
+
+## Responsibilities
+
+<CardGroup cols={2}>
+  <Card title="Git Cloning" icon="code-branch">
+    Clones the source repository into an ephemeral workspace for each build. Supports authenticated and anonymous repositories.
+  </Card>
+  <Card title="Stack Detection" icon="wand-magic-sparkles">
+    Auto-detects the application framework and selects the appropriate build strategy—Railpack for source-driven builds, or Dockerfile for explicit configurations.
+  </Card>
+  <Card title="OCI Image Build" icon="box">
+    Builds images using BuildKit. Supports both Dockerfile-based and Railpack source-driven build paths.
+  </Card>
+  <Card title="Registry Push" icon="cloud-arrow-up">
+    Pushes the built image to the configured OCI registry with optional authentication credentials.
+  </Card>
+  <Card title="NATS Integration" icon="bolt">
+    Receives build requests and reports build logs, metrics, and completion status back to `mikrom-api` over NATS.
+  </Card>
+  <Card title="Concurrency Control" icon="sliders">
+    Limits simultaneous builds with a configurable cap (`MAX_CONCURRENT_BUILDS`) to protect host resources.
+  </Card>
+</CardGroup>
+
+## Supported Application Stacks
+
+`mikrom-builder` auto-detects the following stacks when no Dockerfile is present in the repository root. Detection uses Railpack's heuristics:
+
+<CardGroup cols={4}>
+  <Card title="Phoenix" icon="fire" />
+  <Card title="Ruby on Rails" icon="gem" />
+  <Card title="Django" icon="python" />
+  <Card title="Laravel" icon="php" />
+  <Card title="Go" icon="golang" />
+  <Card title="Rust" icon="rust" />
+  <Card title="JavaScript" icon="js" />
+  <Card title="Static" icon="file-code" />
+</CardGroup>
+
+<Note>
+  When a `Dockerfile` is present at the repository root, the builder uses it directly and skips stack detection. The Docker build path takes precedence over Railpack.
+</Note>
+
+## Build Pipeline
+
+<Steps>
+  <Step title="Build request arrives via NATS">
+    `mikrom-api` publishes a build request to NATS containing the Git repository URL, branch or commit reference, and any build-time environment variables.
+  </Step>
+  <Step title="Repository cloned">
+    The builder clones the repository into a temporary directory using `git2`. The workspace is cleaned up after the build completes or fails.
+  </Step>
+  <Step title="Build strategy selected">
+    The builder checks for a `Dockerfile` at the repository root. If found, it is used directly. Otherwise, Railpack analyses the repository and generates a build plan for the detected stack.
+  </Step>
+  <Step title="Image built with BuildKit">
+    The build is submitted to the BuildKit daemon configured in `BUILDKIT_HOST`. The builder uses the `bollard` crate (Docker API client) to drive the build and stream log output.
+  </Step>
+  <Step title="Image pushed to registry">
+    The finished image is tagged and pushed to the registry specified in `REGISTRY`. If `REGISTRY_USER` and `REGISTRY_PASS` are set, authenticated pushes are used.
+  </Step>
+  <Step title="Status reported over NATS">
+    Build completion (or failure) is reported back to `mikrom-api` over NATS. The API updates deployment state and forwards the result to the dashboard and CLI.
+  </Step>
+</Steps>
+
+## BuildKit Daemon
+
+`mikrom-builder` requires a running BuildKit daemon. In local development, BuildKit is managed via Docker Compose.
+
+```bash
+make up-buildkit      # Start the BuildKit container
+make logs-buildkit    # Follow BuildKit logs
+```
+
+The builder connects to the daemon via the address in `BUILDKIT_HOST`:
+
+```bash
+# Default (Docker Compose local dev)
+BUILDKIT_HOST=docker-container://mikromrust-buildkit-1
+```
+
+In production, point `BUILDKIT_HOST` at the BuildKit daemon socket or address for your deployment environment.
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `NATS_URL` | `nats://localhost:4222` | NATS server URL for build request subscriptions |
+| `REGISTRY` | `registry.mikrom.spluca.org/mikrom` | Target OCI registry for pushed images |
+| `REGISTRY_URL` | alias for `REGISTRY` | Backward-compatible environment name |
+| `REGISTRY_USER` | — | Registry username for authenticated pushes |
+| `REGISTRY_PASS` | — | Registry password for authenticated pushes |
+| `BUILDKIT_HOST` | `docker-container://mikromrust-buildkit-1` | BuildKit daemon address |
+| `MAX_CONCURRENT_BUILDS` | `2` | Maximum number of simultaneous builds |
+| `BUILD_STATE_TTL_SECS` | `3600` | Retention window for build state (seconds) |
+| `BUILD_STATE_PATH` | `/tmp/mikrom-builder-state.json` | Persistent build state file path |
+| `ENABLE_TELEMETRY` | `true` | Enable OTLP export for traces and metrics |
+
+## Build State Persistence
+
+The builder persists build state to `BUILD_STATE_PATH`. This file survives process restarts, so in-flight build status is not lost if the service is restarted during a build.
+
+Build metrics are also exposed over NATS for querying by the scheduler and API:
+
+```text
+NATS subject: mikrom.builder.get_metrics
+```
+
+## Stack
+
+```toml
+# mikrom-builder/Cargo.toml (key dependencies)
+bollard      = "0.20.2"  # Docker / BuildKit API client
+git2         = "0.21.0"  # Git repository cloning
+async-nats   = "..."     # NATS build request subscriptions and status reporting
+tokio        = "..."     # Async runtime
+mikrom-proto = { path = "../mikrom-proto", features = ["telemetry"] }
+```
+
+## Dockerfile
+
+The builder ships a multi-stage `Dockerfile` for containerized deployments:
+
+```bash
+# mikrom-builder/Dockerfile
+docker build -f mikrom-builder/Dockerfile .
+```
+
+## Local Development
+
+```bash
+make run-builder           # Start the builder (requires NATS and BuildKit)
+make up-buildkit           # Start BuildKit daemon first
+cargo run -p mikrom-builder
+cargo nextest run -p mikrom-builder
+make ci-smoke
+make ci-fast
+```
+
+<Info>
+  The ignored NATS integration tests are exercised by `make ci-external-tests`. These tests verify the full build-request-to-status-report loop and require a live NATS server.
+</Info>
+
+<Tip>
+  When iterating on stack detection or build plan generation, use a small test repository with a known stack to verify that Railpack selects the expected build strategy before running the full CI suite.
+</Tip>

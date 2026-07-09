@@ -1,0 +1,152 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Mikrom",
+  "projectDescription": "Mikrom is a Rust-first open-source edge platform for deploying containerized workloads into Firecracker or Cloud Hypervisor microVMs, with a full control plane, ingress router, WireGuard mesh networking, internal DNS, and a SvelteKit dashboard.",
+  "theme": "aspen",
+  "primaryColor": "#040404",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/apps",
+              "deployment/databases",
+              "deployment/volumes",
+              "deployment/scaling"
+            ]
+          },
+          {
+            "group": "Platform Services",
+            "pages": [
+              "services/router",
+              "services/networking",
+              "services/dns",
+              "services/agent",
+              "services/builder",
+              "services/scheduler"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/api",
+              "configuration/agent",
+              "configuration/observability"
+            ]
+          },
+          {
+            "group": "Development & CI",
+            "pages": [
+              "development/local-setup",
+              "development/ci-profiles",
+              "development/testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "cli/overview",
+              "cli/configuration"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/auth",
+              "cli/app",
+              "cli/deployment",
+              "cli/db",
+              "cli/volume",
+              "cli/project",
+              "cli/pat",
+              "cli/system"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "MicroVM isolation with Firecracker or Cloud Hypervisor per workload",
+    "Zero-config app deployment from Git repositories through a builder, scheduler, and agent pipeline",
+    "Dynamic ingress routing with automatic TLS via a Pingora-based router",
+    "PostgreSQL databases provisioned through Neon and running in Cloud Hypervisor-backed microVMs",
+    "WireGuard mesh networking and internal DNS for platform service discovery",
+    "eBPF data plane for host-side network handling and metrics",
+    "SvelteKit dashboard and Rust CLI for day-to-day operations",
+    "Dynatrace-backed OpenTelemetry observability across all services",
+    "Dagger-backed local CI/CD pipeline with layered validation profiles",
+    "Persistent volume support with Ceph-backed RBD snapshots"
+  ],
+  "publicApiSurface": [
+    "POST /v1/auth/register",
+    "POST /v1/auth/login",
+    "GET/PUT/DELETE /v1/auth/profile",
+    "GET/POST /v1/apps",
+    "POST /v1/apps/:name/deploy",
+    "POST /v1/apps/:name/activate",
+    "GET /v1/apps/:name/deployments",
+    "GET/POST /v1/databases",
+    "GET /v1/databases/:id/connection",
+    "GET /v1/databases/:id/branches",
+    "GET/POST /v1/volumes",
+    "POST /v1/volumes/:id/attach",
+    "POST /v1/volumes/:id/detach",
+    "GET/POST /v1/vms",
+    "GET/DELETE /v1/deployments/:id",
+    "POST /v1/deployments/:id/pause",
+    "POST /v1/deployments/:id/resume",
+    "GET/POST /v1/auth/pat",
+    "GET /v1/billing/summary",
+    "GET /v1/notifications",
+    "GET /v1/system/health",
+    "mikrom auth login",
+    "mikrom auth register",
+    "mikrom auth whoami",
+    "mikrom app create",
+    "mikrom app deploy",
+    "mikrom app list",
+    "mikrom app scale",
+    "mikrom app activate",
+    "mikrom deployment list",
+    "mikrom deployment status",
+    "mikrom deployment stop",
+    "mikrom deployment pause",
+    "mikrom deployment resume",
+    "mikrom db create",
+    "mikrom db list",
+    "mikrom db connection",
+    "mikrom volume list",
+    "mikrom volume create",
+    "mikrom volume attach",
+    "mikrom volume detach",
+    "mikrom project list",
+    "mikrom project create",
+    "mikrom project switch",
+    "mikrom pat list",
+    "mikrom pat create",
+    "mikrom pat revoke",
+    "mikrom system health",
+    "mikrom config show",
+    "mikrom config set",
+    "mikrom completion"
+  ]
+}

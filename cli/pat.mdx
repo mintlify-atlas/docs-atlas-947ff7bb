@@ -1,0 +1,145 @@
+---
+title: "mikrom pat: Personal Access Token Management for Automation"
+sidebarTitle: "pat"
+description: "Create and manage Personal Access Tokens for CI/CD pipelines, scripts, and automation workflows that need long-lived credentials on Mikrom."
+---
+
+Personal Access Tokens (PATs) are long-lived credentials that let scripts, CI/CD pipelines, and automation tools authenticate to the Mikrom platform without requiring an interactive username and password login. Instead of calling `mikrom auth login` in an automated environment, you generate a PAT once, store it securely, and configure the CLI to use it. PATs are scoped to the project that was active when the token was created, so they only grant access to resources within that project.
+
+<Note>
+  PATs are **scoped to the active project** at the time of creation. If you need to automate operations across multiple projects, create a separate PAT in each project after switching context with `mikrom project switch`.
+</Note>
+
+---
+
+## mikrom pat list
+
+List all Personal Access Tokens associated with the current project. The token value itself is never shown after creation — only the token ID, name, and creation date are displayed.
+
+```bash
+mikrom pat list
+```
+
+**Example output**
+
+```
+ID             NAME               CREATED
+pat-a1b2c3    github-actions     2024-11-01
+pat-d4e5f6    deploy-script      2024-12-15
+```
+
+---
+
+## mikrom pat create
+
+Create a new Personal Access Token with a descriptive name. The full token value is printed **once** immediately after creation and cannot be retrieved again.
+
+```bash
+mikrom pat create <name>
+```
+
+<ParamField path="name" type="string" required>
+  A human-readable label that identifies where or how this token is used (e.g. `github-actions`, `deploy-script`).
+</ParamField>
+
+<Warning>
+  The token value is shown **only once** at creation time. Copy it and store it in a secure secrets manager (such as GitHub Actions Secrets, HashiCorp Vault, or a `.env` file with restricted permissions) immediately. You **cannot retrieve the token value again** after closing the terminal — you would need to revoke it and create a new one.
+</Warning>
+
+**Example**
+
+```bash
+mikrom pat create github-actions
+```
+
+**Example output**
+
+```
+Personal Access Token created.
+
+  Name:    github-actions
+  ID:      pat-a1b2c3
+  Token:   mk_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Save the token value above — it will not be shown again.
+```
+
+### Using a PAT to authenticate the CLI
+
+Instead of running `mikrom auth login`, configure the CLI to use a PAT by setting it as the API token in the configuration:
+
+```bash
+mikrom config set api-token mk_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+In CI/CD environments, inject the token from a secret and set it before running any `mikrom` commands:
+
+```bash
+# GitHub Actions example
+- name: Configure Mikrom CLI
+  run: mikrom config set api-token ${{ secrets.MIKROM_PAT }}
+
+- name: Deploy application
+  run: mikrom app deploy --name my-api
+```
+
+<Tip>
+  Give each PAT a name that reflects its purpose and origin — for example `gh-actions-prod`, `k8s-job`, or `local-dev-script`. This makes it easy to audit and revoke individual tokens without disrupting other automations.
+</Tip>
+
+---
+
+## mikrom pat revoke
+
+Revoke a Personal Access Token by its ID. Once revoked, any automation using that token will immediately lose access to the platform. Prompts for confirmation unless `--yes` is supplied.
+
+```bash
+mikrom pat revoke <id> [--yes]
+```
+
+<ParamField path="id" type="string" required>
+  The ID of the token to revoke, as shown in `mikrom pat list`.
+</ParamField>
+
+<ParamField query="--yes" type="boolean" default="false">
+  Skip the interactive confirmation prompt.
+</ParamField>
+
+**Example**
+
+```bash
+mikrom pat revoke pat-a1b2c3 --yes
+```
+
+---
+
+## Recommended Automation Workflow
+
+<Steps>
+  <Step title="Switch to the target project">
+    ```bash
+    mikrom project switch abc123
+    ```
+    PATs are scoped to the active project, so switch to the correct context first.
+  </Step>
+  <Step title="Create a PAT with a descriptive name">
+    ```bash
+    mikrom pat create github-actions-prod
+    ```
+  </Step>
+  <Step title="Save the token in your secrets manager">
+    Copy the printed token value and store it as a secret (e.g. `MIKROM_PAT` in GitHub Actions repository secrets).
+  </Step>
+  <Step title="Configure the CLI in your pipeline">
+    ```bash
+    mikrom config set api-token $MIKROM_PAT
+    ```
+    Run this step before any other `mikrom` command in your CI job.
+  </Step>
+  <Step title="Revoke when no longer needed">
+    ```bash
+    mikrom pat revoke pat-a1b2c3 --yes
+    ```
+    Rotate or revoke tokens regularly as part of your security hygiene.
+  </Step>
+</Steps>

@@ -1,0 +1,183 @@
+---
+title: "Dagger-Based CI Profiles for Mikrom Validation"
+sidebarTitle: "CI Profiles"
+description: "Understand every Dagger-backed make ci-* target, when to use each profile, and how the pre-commit hook selects the right one automatically."
+---
+
+Mikrom's CI pipeline is implemented as a Rust crate (`ci/`) that drives [Dagger](https://dagger.io/) to run validation steps in hermetic containers. Every profile is available locally via `make` and mirrors exactly what GitHub Actions runs, giving you reproducible feedback without pushing a branch. Profiles are ordered from cheapest to most expensive — pick the one that matches the scope of your change.
+
+## Profile Reference
+
+| Target | What it validates |
+|---|---|
+| `make ci-smoke` | Rust formatting, Clippy lints, and `mikrom-app` build/check |
+| `make ci-fast` | Everything in smoke + workspace unit tests with ephemeral Postgres and NATS containers |
+| `make ci-external-tests` | Opt-in NATS and PostgreSQL integration suites (skipped by default) |
+| `make ci-ceph-tests` | Ceph-only agent RBD integration (requires a live Ceph cluster on the host) |
+| `make ci-full` | Everything in fast + release build + eBPF program validation |
+| `make ci` | Alias for `ci-full` |
+| `make ci-images` | Build service Docker images from their Dockerfiles via Dagger |
+| `make ci-release` | Full validation + image build + registry publish |
+| `make ci-app` | Frontend-only validation subset for `mikrom-app` changes |
+
+<Note>
+Use `make ci-smoke` for everyday development. It covers formatting, lints, and the frontend build in seconds and is the lowest-cost signal that your change does not break surface-level correctness.
+</Note>
+
+## Profile Details
+
+### `make ci-smoke` — Fastest feedback
+
+Runs `cargo fmt --check`, `cargo clippy -- -D warnings`, and the `mikrom-app` Svelte/TypeScript build pipeline through Dagger. No database or message broker is required. Completes in under a minute on a warm cache.
+
+```bash
+make ci-smoke
+```
+
+### `make ci-fast` — Pre-push validation
+
+Extends smoke by spinning up ephemeral Postgres 17 and NATS 2.10 containers inside the Dagger pipeline and executing the full workspace test suite. Use this before pushing any change that touches shared Rust code or service contracts.
+
+```bash
+make ci-fast
+```
+
+### `make ci-external-tests` — Integration opt-in
+
+Runs the NATS and PostgreSQL integration test suites that are annotated `#[ignore]` and skipped in `ci-fast`. These suites verify real message-passing flows and repository-layer SQL. Enable the NATS-backed binaries explicitly:
+
+```bash
+MIKROM_RUN_NATS_TESTS=1 make ci-external-tests
+```
+
+Run this profile when you touch the NATS consumer/publisher code in any service or when you modify `mikrom-api` repository tests.
+
+### `make ci-ceph-tests` — Ceph integration
+
+Executes the agent RBD integration test binary directly on the host (not through Dagger) with the Ceph-specific ignored tests un-ignored:
+
+```bash
+MIKROM_RUN_CEPH_TESTS=1 make ci-ceph-tests
+# Internally runs:
+# MIKROM_RUN_CEPH_TESTS=1 cargo test -p mikrom-agent \
+#   --test ceph_integration_tests -- --ignored
+```
+
+<Warning>
+This profile requires a real Ceph cluster. Run it only on a host that has `/etc/ceph/ceph.conf`, `/etc/ceph/admin.secret`, and a reachable cluster — not on a standard developer workstation.
+</Warning>
+
+### `make ci-full` — Pre-merge gate
+
+The full validation profile: runs `ci-fast` and then additionally performs a release build of the entire workspace and validates the eBPF program in `mikrom-agent-ebpf`. Use before merging or when you change native dependencies, build scripts, or the eBPF data-plane path.
+
+```bash
+make ci-full
+# or equivalently:
+make ci
+```
+
+### `make ci-images` — Dockerfile validation
+
+Builds all service Docker images from their respective Dockerfiles using Dagger. Run after any change to a `Dockerfile` or to a Docker build context directory.
+
+```bash
+make ci-images
+```
+
+### `make ci-release` — Publish flow
+
+Runs the full validation suite and then builds and publishes service images to the configured registry. Requires `MIKROM_IMAGE_PREFIX`, `MIKROM_IMAGE_TAG`, `MIKROM_REGISTRY_USERNAME`, and `MIKROM_REGISTRY_TOKEN` to be set in the environment.
+
+<Warning>
+`make ci-release` should only be triggered for release tags or when you specifically need to exercise the end-to-end publish flow. Running it on feature branches wastes registry storage and may overwrite tagged images.
+</Warning>
+
+```bash
+make ci-release
+```
+
+### `make ci-app` — Frontend-only
+
+Validates only `mikrom-app`: type checking, Svelte component checks, unit tests (Vitest), and the Playwright e2e suite. Faster than the full smoke profile when your change is isolated to the frontend.
+
+```bash
+make ci-app
+```
+
+## Recommended Usage Order
+
+Follow this sequence to get maximum signal at minimum cost:
+
+<Steps>
+  <Step title="ci-smoke — always">
+    Run on every save or before any commit. Covers formatting and lints in seconds.
+  </Step>
+  <Step title="ci-fast — before pushing">
+    Run before `git push` on any branch that touches shared Rust code or service contracts.
+  </Step>
+  <Step title="ci-external-tests — NATS/Postgres changes">
+    Run when you modify NATS consumer/publisher logic or `mikrom-api` repository tests. Pass `MIKROM_RUN_NATS_TESTS=1` for the NATS-backed binaries.
+  </Step>
+  <Step title="ci-ceph-tests — Ceph/RBD changes">
+    Run only on a host with a live Ceph cluster when you modify `mikrom-agent` RBD code. Pass `MIKROM_RUN_CEPH_TESTS=1`.
+  </Step>
+  <Step title="ci-full — before merging">
+    Run before opening or merging a PR that changes build logic, native dependencies, or the eBPF path.
+  </Step>
+  <Step title="ci-images — Dockerfile changes">
+    Run after touching any Dockerfile or its build context.
+  </Step>
+  <Step title="ci-release — release tags only">
+    Run to validate and publish images for a release tag.
+  </Step>
+</Steps>
+
+## Pre-Commit Hook
+
+The repository ships a pre-commit hook at `scripts/pre-commit.sh` that automatically selects the right profile based on which files are staged:
+
+- **Rust or shared workspace changes** → `make ci-fast`
+- **`mikrom-app` changes** → `make ci-app`
+
+Install the hook once with:
+
+```bash
+make setup-git-hooks
+```
+
+This writes a thin shell wrapper at `.git/hooks/pre-commit` that delegates to `scripts/pre-commit.sh`.
+
+## Ceph Runner Requirements
+
+The `ci-ceph-tests` target and the corresponding GitHub Actions job (`ceph-tests`) require a self-hosted runner with the following properties:
+
+<CardGroup cols={2}>
+  <Card title="Runner Labels" icon="tag">
+    The runner must carry the `self-hosted`, `linux`, and `ceph` labels so the workflow job targets it correctly.
+  </Card>
+  <Card title="Ceph Configuration" icon="gear">
+    Host access to `/etc/ceph/ceph.conf` and `/etc/ceph/admin.secret` must be available to the runner process.
+  </Card>
+  <Card title="Ceph Cluster" icon="server">
+    A reachable Ceph cluster must be present. The agent RBD tests perform live block device operations against it.
+  </Card>
+  <Card title="Ceph Libraries" icon="puzzle">
+    `librados.so.2` and `librbd.so.1` must be installed on the host. Run `make ceph-libs` to set up symlinks before testing.
+  </Card>
+</CardGroup>
+
+For provisioning a Ceph runner from scratch, see the runbook at `docs/infra/ceph-runner.md` and the acceptance checklist at `docs/ceph-runner-checklist.md` in the repository.
+
+## Environment Variables Used by Dagger Profiles
+
+| Variable | Used by |
+|---|---|
+| `TEST_DATABASE_URL` | `ci-fast`, `ci-full`, `ci-external-tests` |
+| `TEST_NATS_URL` | `ci-fast`, `ci-external-tests` |
+| `MIKROM_RUN_NATS_TESTS` | `ci-external-tests` (set to `1` to enable) |
+| `MIKROM_RUN_CEPH_TESTS` | `ci-ceph-tests` (set to `1` to enable) |
+| `MIKROM_IMAGE_PREFIX` | `ci-images`, `ci-release` |
+| `MIKROM_IMAGE_TAG` | `ci-release` |
+| `MIKROM_REGISTRY_USERNAME` | `ci-release` |
+| `MIKROM_REGISTRY_TOKEN` | `ci-release` |

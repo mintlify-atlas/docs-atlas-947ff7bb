@@ -1,0 +1,175 @@
+---
+title: "Setting Up the Mikrom Local Development Environment"
+sidebarTitle: "Local Setup"
+description: "Install prerequisites, start infrastructure with Docker Compose, and run Mikrom services locally using the Makefile-driven development workflow."
+---
+
+Mikrom's local development environment is orchestrated through a `Makefile` that wraps Docker Compose, `cargo watch`, and a tmux session manager. Whether you want the full observability stack or just a minimal Postgres and NATS pair, the commands below get you to a working environment quickly. Before starting, make sure all prerequisites are installed.
+
+## Prerequisites
+
+You need the following tools on your `PATH` before running any `make` target:
+
+| Tool | Purpose |
+|---|---|
+| Rust stable toolchain | Compiling all workspace crates |
+| Docker and Docker Compose | Running Postgres, NATS, BuildKit, and observability |
+| Node.js and pnpm | Building and running `mikrom-app` |
+| Dagger CLI | Required for all `make ci-*` targets |
+| `protoc` | Generating Rust code from `.proto` files |
+
+<Note>
+The Makefile automatically looks for `protoc` at `/tmp/opencode/protoc/bin/protoc` and falls back to whatever is on your system `PATH`. You do not need to set `PROTOC` manually — the `PROTOC_ENV` variable is injected for every build that needs it.
+</Note>
+
+## Recommended Full-Stack Workflow
+
+The fastest path to a running development environment uses `make up-full` to start all infrastructure and `make dev` to open a tmux session with every service watching for file changes.
+
+<Steps>
+  <Step title="Start the full infrastructure stack">
+    Launch Postgres, NATS, BuildKit, and the Grafana/Prometheus/Loki/Tempo observability bundle in the background:
+
+    ```bash
+    make up-full
+    ```
+
+    This runs Docker Compose with both the `buildkit` and `observability` profiles active. All containers start detached and health-checked before the command returns.
+  </Step>
+
+  <Step title="Open the tmux development session">
+    Attach to (or create) the `mikrom` tmux session. Each service gets its own named window running `cargo watch`:
+
+    ```bash
+    make dev
+    ```
+
+    The session opens four windows: `api`, `scheduler`, `builder`, and `app`. If the session already exists, `make dev` reattaches instead of creating a duplicate.
+  </Step>
+
+  <Step title="Develop and iterate">
+    Make changes to any Rust service or to `mikrom-app`. `cargo watch` rebuilds on save. The SvelteKit dev server at port `3001` also hot-reloads automatically.
+  </Step>
+
+  <Step title="Stop the session when done">
+    Kill the tmux windows without touching the Docker containers:
+
+    ```bash
+    make dev-stop
+    ```
+  </Step>
+
+  <Step title="Tear down infrastructure">
+    Stop and remove all Docker Compose containers:
+
+    ```bash
+    make down-full
+    ```
+
+    This calls `dev-stop` first, then shuts down the Compose stack.
+  </Step>
+</Steps>
+
+## Infrastructure Setup Options
+
+<Tabs>
+  <Tab title="Full Stack">
+    Includes Postgres, NATS, BuildKit, and the full LGTM observability suite (Grafana on port `3000`, Prometheus on `9090`, Loki on `3100`, Tempo on `3200`, and OTLP endpoints on `4317`/`4318`):
+
+    ```bash
+    make up-full      # start everything (detached)
+    make down-full    # stop everything
+    ```
+
+    Useful when you are working on metrics, traces, or log aggregation in addition to core service functionality.
+  </Tab>
+
+  <Tab title="Minimal (Postgres + NATS)">
+    Starts only the core infrastructure that every Rust service requires:
+
+    ```bash
+    make up           # start postgres and nats (foreground)
+    make logs         # follow all container logs
+    make down         # stop and remove containers
+    ```
+
+    Use this when you want the lightest possible footprint and don't need BuildKit or observability locally.
+  </Tab>
+
+  <Tab title="Postgres Only">
+    Bring up just the database when you only need SQL access:
+
+    ```bash
+    make db-start     # start postgres, wait for healthy
+    make db-stop      # stop the postgres container
+    ```
+
+    The Postgres container uses credentials `mikrom` / `mikrom_password` on port `5432` with default database `mikrom_default` (as defined in `docker-compose.yml`).
+  </Tab>
+</Tabs>
+
+## Optional Infrastructure Components
+
+You can start BuildKit and the observability stack independently if you need only one of them:
+
+```bash
+# BuildKit — for local OCI image builds
+make up-buildkit
+make logs-buildkit
+
+# Grafana / Prometheus / Loki / Tempo
+make up-observability
+make logs-observability
+```
+
+Both are Docker Compose profiles (`buildkit` and `observability`) so they share the same network bridge as the core stack.
+
+## Running Individual Services
+
+Instead of the tmux session, you can start individual services in separate terminals. Each command uses `cargo watch` so the binary restarts on source changes:
+
+```bash
+make run-api        # mikrom-api on port 5001
+make run-scheduler  # mikrom-scheduler
+make run-builder    # mikrom-builder
+make run-agent      # mikrom-agent (also sets up Ceph lib symlinks)
+make run-router     # mikrom-router (Pingora)
+make run-app        # mikrom-app SvelteKit dev server on port 3001
+```
+
+## Environment Files
+
+Every service reads its configuration from a `.env` file in its own directory. Copy the provided example and fill in the required secrets before running:
+
+```bash
+cp mikrom-api/.env.example mikrom-api/.env
+cp mikrom-scheduler/.env.example mikrom-scheduler/.env
+cp mikrom-builder/.env.example mikrom-builder/.env
+cp mikrom-agent/.env.example mikrom-agent/.env
+cp mikrom-router/.env.example mikrom-router/.env
+cp mikrom-app/.env.example mikrom-app/.env
+```
+
+At minimum, `mikrom-api` requires `DATABASE_URL`, `NATS_URL`, `JWT_SECRET`, and `MASTER_KEY`. See [configuration/api](/configuration/api) for the full variable reference.
+
+## Protobuf Code Generation
+
+`mikrom-proto` contains shared `.proto` definitions that are compiled into Rust during the normal Cargo build. No manual `protoc` invocation is needed — the Makefile passes `PROTOC="<path>"` automatically to every build target that depends on generated code.
+
+<Tip>
+If `protoc` is not on your system PATH and you are not using the bundled binary at `/tmp/opencode/protoc/bin/protoc`, install it via your system package manager (`apt install -y protobuf-compiler` on Debian/Ubuntu) or download a release binary and add it to your PATH.
+</Tip>
+
+## Ceph Libraries (Agent with RBD Support)
+
+The `mikrom-agent` crate optionally links against `librados` and `librbd` for Ceph RBD block storage. These libraries are only required when building or running agent RBD integration tests. To set up the symlinks in `target/ceph-libs/`:
+
+```bash
+make ceph-libs
+```
+
+This creates `target/ceph-libs/librados.so` and `target/ceph-libs/librbd.so` pointing at the system-installed Ceph client libraries. The `run-agent` and Ceph-related build targets set `LIBRARY_PATH` and `RUSTFLAGS` automatically to pick up these symlinks.
+
+<Warning>
+If the host Ceph libraries (`/usr/lib/x86_64-linux-gnu/librados.so.2` and `librbd.so.1`) are absent, `make ceph-libs` will silently skip the symlinks and Ceph-dependent builds will fail at link time. Install `librbd-dev` and `librados-dev` from your package manager first.
+</Warning>

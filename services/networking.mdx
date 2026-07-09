@@ -1,0 +1,100 @@
+---
+title: "WireGuard Mesh Networking and IPv6 with mikrom-network"
+sidebarTitle: "Networking"
+description: "mikrom-network orchestrates the WireGuard mesh that connects all worker nodes, platform services, and database VMs with IPv6 addressing over NATS."
+---
+
+`mikrom-network` is the mesh networking service for Mikrom. It establishes and maintains a WireGuard overlay network that spans every worker node, platform service, and database VM in the cluster. Worker nodes register their identity over NATS, and `mikrom-network` synchronises peer state, routes, and cryptographic keys across all participants. The IPv6 addresses assigned by the mesh are the primary addressing scheme used throughout the platform—from workload traffic routing in `mikrom-router` to internal name resolution in `mikrom-dns`.
+
+## Responsibilities
+
+<CardGroup cols={2}>
+  <Card title="Mesh Orchestration" icon="network-wired">
+    Manages WireGuard peer configuration across all nodes. Adds and removes peers as workers join or leave the cluster.
+  </Card>
+  <Card title="Key Handling" icon="key">
+    Generates and distributes WireGuard public keys. Maintains cryptographic identity material in the configured data directory.
+  </Card>
+  <Card title="Route Synchronisation" icon="arrows-rotate">
+    Keeps routes consistent across all mesh participants. Reacts to NATS events when topology changes.
+  </Card>
+  <Card title="Host Identity Coordination" icon="fingerprint">
+    Each node is identified by `MIKROM_HOST_ID`. The network service uses this identity to register the node and coordinate peer discovery.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+<Steps>
+  <Step title="Worker registers via NATS">
+    When a worker node starts, `mikrom-agent` and `mikrom-network` publish the node's identity and WireGuard public key to the NATS coordination channel.
+  </Step>
+  <Step title="Peer state reconciled">
+    `mikrom-network` receives the registration event and updates the WireGuard peer list on all participating nodes, establishing encrypted tunnels between them.
+  </Step>
+  <Step title="IPv6 address assigned">
+    The mesh assigns each node an IPv6 address in the `fd00::/8` range. This address is used by platform services, routing rules, and DNS records.
+  </Step>
+  <Step title="Routes propagated">
+    Route information is synchronised over NATS so every node in the mesh can reach every other node and the workloads running on them.
+  </Step>
+</Steps>
+
+## IPv6 Addressing
+
+The platform uses IPv6 internally across all services. WireGuard mesh addresses are allocated from the `fd00::/8` private range.
+
+```text
+Mesh participants (examples):
+  mikrom-api      →  fd00::3bc2:7b88:289:62e6
+  mikrom-router   →  fd00::28fb:f0bf:d8d1:183e
+  worker-node-01  →  fd00::<node-specific suffix>
+  app microVM     →  fd00::<vm-specific suffix>
+```
+
+<Note>
+  IPv6 mesh addresses assigned by `mikrom-network` feed directly into DNS records managed by `mikrom-dns`. Internal service names in the `*.mikrom.internal.` namespace resolve to these WireGuard addresses.
+</Note>
+
+## Relationship with Other Services
+
+| Service | Dependency on `mikrom-network` |
+|---|---|
+| `mikrom-router` | Uses WireGuard to reach app microVMs. All proxied traffic travels through the mesh. |
+| `mikrom-dns` | Consumes mesh IPv6 addresses to populate `n.mikrom.internal.` and `u.mikrom.internal.` DNS zones. |
+| `mikrom-agent` | Runs alongside `mikrom-network` on every worker node. The agent relies on the mesh for control-plane connectivity. |
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `MIKROM_HOST_ID` | required | Unique identity for this network node |
+| `NATS_URL` | `nats://[::1]:4222` | NATS server URL for peer coordination |
+| `MIKROM_DATA_DIR` | `/var/lib/mikrom-network` | Directory for persistent key material and state |
+| `MIKROM_WG_PORT` | `51823` | WireGuard UDP listen port |
+| `MIKROM_ADVERTISE_ADDRESS` | — | Optional external address to advertise to peers |
+| `MIKROM_NETWORK_NATS_CONNECT_TIMEOUT_SECS` | `5` | Timeout for the initial NATS connection |
+
+<Warning>
+  `mikrom-network` requires `CAP_NET_ADMIN` to manage WireGuard interfaces. On systemd deployments, ensure the unit has the appropriate capability set before starting the service.
+</Warning>
+
+## Debian Package
+
+A Debian package is available for deploying `mikrom-network` on production nodes.
+
+```bash
+make deb-network   # Build the .deb for mikrom-network
+```
+
+## Local Development
+
+```bash
+make run-router          # Also brings up the mesh service alongside the router
+cargo run -p mikrom-network
+cargo nextest run -p mikrom-network
+```
+
+<Tip>
+  During local development with `make up-full`, the WireGuard mesh is handled automatically. You only need to run `mikrom-network` explicitly when testing network topology changes or peer registration flows.
+</Tip>

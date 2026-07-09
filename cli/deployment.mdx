@@ -1,0 +1,309 @@
+---
+title: "mikrom deployment: Live Instance (Job) Management Commands"
+sidebarTitle: "deployment"
+description: "Inspect, control, and snapshot live microVM instances with mikrom deployment. Stop, pause, resume, and manage VM snapshots for running Firecracker and Cloud Hypervisor jobs."
+---
+
+The `mikrom deployment` command group manages the live instances — referred to internally as **jobs** — that run your application workloads inside Firecracker or Cloud Hypervisor microVMs. A *deployment* in this context is a running VM instance identified by a unique `--job-id`, as distinct from the deployment record (build artifact) listed by `mikrom app deployments`. Use these commands to inspect instance state, control VM lifecycle, and take or restore point-in-time snapshots of running microVM memory and disk.
+
+<Tip>
+  Prefer `mikrom deployment pause` over `mikrom deployment stop` whenever you need to take a running instance offline temporarily. Pausing suspends the vCPUs while preserving VM state, so a subsequent `resume` brings the instance back in milliseconds without a cold start.
+</Tip>
+
+---
+
+## mikrom deployment list
+
+Lists all active deployment jobs across every application in the current project, showing job IDs, application names, and current states.
+
+```bash
+mikrom deployment list
+```
+
+**Example**
+
+```bash
+mikrom deployment list
+```
+
+**Example output**
+
+```
+JOB ID                   APP          STATUS     STARTED
+job_01j9k2m3n4p5q6r7     my-app       running    2024-12-20 10:05:33
+job_01j8h1l2k3m4n5o6     api-server   paused     2024-12-20 08:42:11
+```
+
+---
+
+## mikrom deployment status
+
+Retrieves detailed status information for a specific live deployment job, including VM state, resource usage, and network details.
+
+```bash
+mikrom deployment status --app <name> --job-id <id>
+```
+
+**Example**
+
+```bash
+mikrom deployment status --app my-app --job-id job_01j9k2m3n4p5q6r7
+```
+
+**Flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique identifier for this live microVM instance. Obtain a job ID from `mikrom deployment list` or `mikrom deployment status` output.
+</ParamField>
+
+---
+
+## mikrom deployment stop
+
+Terminates a running deployment by forcefully killing the microVM instance. The job record is retained in history but the VM is permanently destroyed.
+
+```bash
+mikrom deployment stop --app <name> --job-id <id>
+```
+
+**Example**
+
+```bash
+mikrom deployment stop --app my-app --job-id job_01j9k2m3n4p5q6r7
+```
+
+**Flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID of the running instance to stop.
+</ParamField>
+
+<Warning>
+  `stop` is a destructive operation. It immediately kills the microVM and any in-flight work is lost. In-memory state cannot be recovered after a stop. Use `mikrom deployment pause` if you intend to resume the instance later.
+</Warning>
+
+---
+
+## mikrom deployment pause
+
+Suspends the vCPUs of a running microVM without destroying it. The VM's memory and device state are preserved, allowing a fast resume with no cold-start penalty.
+
+```bash
+mikrom deployment pause --app <name> --job-id <id>
+```
+
+**Example**
+
+```bash
+mikrom deployment pause --app my-app --job-id job_01j9k2m3n4p5q6r7
+```
+
+**Flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID of the running instance to pause.
+</ParamField>
+
+<Tip>
+  Pausing a microVM is ideal for cost-sensitive workloads that need to preserve ephemeral in-memory state (for example, a game server or a long-running computation) while freeing CPU capacity on the host.
+</Tip>
+
+---
+
+## mikrom deployment resume
+
+Resumes a previously paused microVM, restoring vCPU execution from the exact point at which it was suspended.
+
+```bash
+mikrom deployment resume --app <name> --job-id <id>
+```
+
+**Example**
+
+```bash
+mikrom deployment resume --app my-app --job-id job_01j9k2m3n4p5q6r7
+```
+
+**Flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID of the paused instance to resume.
+</ParamField>
+
+---
+
+## mikrom deployment delete
+
+Removes a deployment job record from history. The microVM must already be stopped before the record can be deleted.
+
+```bash
+mikrom deployment delete --app <name> --job-id <id> [--yes]
+```
+
+**Example**
+
+```bash
+mikrom deployment delete --app my-app --job-id job_01j9k2m3n4p5q6r7
+```
+
+**Flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID of the record to remove.
+</ParamField>
+
+<ParamField path="--yes" type="boolean">
+  Skip the interactive confirmation prompt. Useful for automated cleanup scripts.
+</ParamField>
+
+---
+
+## mikrom deployment snapshots
+
+Lists all snapshots that have been taken for a given deployment VM, showing snapshot names and creation timestamps.
+
+```bash
+mikrom deployment snapshots --app <name> --job-id <id>
+```
+
+**Example**
+
+```bash
+mikrom deployment snapshots --app my-app --job-id job_01j9k2m3n4p5q6r7
+```
+
+**Example output**
+
+```
+NAME              CREATED
+before-migration  2024-12-20 09:30:00
+post-warmup       2024-12-20 10:00:00
+```
+
+**Flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID whose snapshots you want to list.
+</ParamField>
+
+---
+
+## mikrom deployment snapshot-create
+
+Creates a point-in-time snapshot of a running or paused deployment VM, capturing both vCPU state and memory contents. Snapshots can later be used to restore the VM to this exact state.
+
+```bash
+mikrom deployment snapshot-create --app <name> --job-id <id> <name>
+```
+
+**Example**
+
+```bash
+mikrom deployment snapshot-create --app my-app --job-id job_01j9k2m3n4p5q6r7 before-migration
+```
+
+**Arguments and flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID of the VM to snapshot.
+</ParamField>
+
+<ParamField path="name" type="string" required>
+  A human-readable name for the snapshot (positional argument). Use a descriptive label such as `before-migration` or `post-warmup` to make rollbacks easier to identify.
+</ParamField>
+
+<Note>
+  Snapshot creation may briefly pause VM execution while the hypervisor serialises memory state. For latency-sensitive workloads, consider taking snapshots during low-traffic periods.
+</Note>
+
+---
+
+## mikrom deployment snapshot-restore
+
+Restores a deployment VM to the state captured in a named snapshot. The VM is rewound to the exact vCPU and memory state at the time the snapshot was taken.
+
+```bash
+mikrom deployment snapshot-restore --app <name> --job-id <id> <snapshot>
+```
+
+**Example**
+
+```bash
+mikrom deployment snapshot-restore --app my-app --job-id job_01j9k2m3n4p5q6r7 before-migration
+```
+
+**Arguments and flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID of the VM to restore.
+</ParamField>
+
+<ParamField path="snapshot" type="string" required>
+  Name of the snapshot to restore (positional argument). Must match a name returned by `mikrom deployment snapshots`.
+</ParamField>
+
+<Warning>
+  Restoring a snapshot discards all VM state accumulated since the snapshot was taken. This operation cannot be undone — take a new snapshot first if you want to preserve the current state.
+</Warning>
+
+---
+
+## mikrom deployment snapshot-delete
+
+Permanently deletes a named snapshot for a deployment VM, freeing the storage it occupied on the host.
+
+```bash
+mikrom deployment snapshot-delete --app <name> --job-id <id> <snapshot>
+```
+
+**Example**
+
+```bash
+mikrom deployment snapshot-delete --app my-app --job-id job_01j9k2m3n4p5q6r7 before-migration
+```
+
+**Arguments and flags**
+
+<ParamField path="--app" type="string" required>
+  Name of the application that owns the job.
+</ParamField>
+
+<ParamField path="--job-id" type="string" required>
+  The unique Job ID whose snapshot you want to delete.
+</ParamField>
+
+<ParamField path="snapshot" type="string" required>
+  Name of the snapshot to delete (positional argument).
+</ParamField>

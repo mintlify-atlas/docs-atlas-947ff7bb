@@ -1,0 +1,275 @@
+---
+title: "mikrom-api Configuration Reference and Environment Variables"
+sidebarTitle: "API Config"
+description: "Complete environment variable reference for mikrom-api: core settings, TLS, NATS timeouts, rate limiting, GitHub, Polar billing, Neon, and observability."
+---
+
+The `mikrom-api` control plane reads all runtime configuration from environment variables. In local development, copy `.env.example` to `.env` in the `mikrom-api` directory and adjust the values before running `make run-api`. In production, inject these variables into the container or systemd unit's environment — never commit secrets to version control.
+
+<Warning>
+  `JWT_SECRET`, `MASTER_KEY`, and `POLAR_ACCESS_TOKEN` are cryptographic secrets. In production they **must** be long, randomly generated strings stored in a secrets manager (e.g. Vault, AWS Secrets Manager, or a Kubernetes Secret). The default placeholder values in `.env.example` are for local development only and will be rejected if the service detects a production-like `DEPLOYMENT_ENV`.
+</Warning>
+
+## Core
+
+These variables are required for every deployment. The service will not start if `DATABASE_URL` or `NATS_URL` is missing.
+
+<ParamField body="DATABASE_URL" type="string" required>
+  PostgreSQL connection string for the primary API database.  
+  Example: `postgres://mikrom:mikrom_password@[::1]:5432/mikrom_api`
+</ParamField>
+
+<ParamField body="NATS_URL" type="string" required>
+  NATS server URL used for scheduler and worker coordination.  
+  Example: `nats://[::1]:4222`
+</ParamField>
+
+<ParamField body="JWT_SECRET" type="string" required>
+  Secret used to sign and verify JWT tokens. Must be kept secret. Use a cryptographically random string of at least 32 characters in production.
+</ParamField>
+
+<ParamField body="MASTER_KEY" type="string" required>
+  Master encryption key for secret storage and retrieval. Changing this key in production will invalidate all stored application secrets.  
+  Default (dev only): `default-master-key-change-me-in-production`
+</ParamField>
+
+<ParamField body="API_PORT" type="integer" default="5001">
+  Port on which `mikrom-api` listens for HTTP/HTTPS traffic. The router proxies inbound requests to this port.
+</ParamField>
+
+<ParamField body="DEPLOYMENT_ENV" type="string" default="development">
+  Runtime environment label. Set to `production` in live deployments to enable stricter validation, disable debug routes, and enforce production certificate issuance.
+</ParamField>
+
+---
+
+## ACME / TLS
+
+These variables control Let's Encrypt certificate provisioning and TLS termination. `ACME_STAGING=true` issues certificates from the Let's Encrypt staging CA (not trusted by browsers) — always set it to `false` in production.
+
+<Note>
+  `ACME_STAGING` applies only to application hostnames. The managed platform hostnames `api.mikrom.spluca.org` and `mikrom.spluca.org` are always issued production certificates, regardless of this flag.
+</Note>
+
+| Variable | Default | Description |
+|---|---|---|
+| `ACME_EMAIL` | — | Contact email sent to Let's Encrypt during ACME registration. |
+| `ACME_STAGING` | `true` | Use Let's Encrypt staging CA for app hostname certificates. Set to `false` in production. |
+| `ACME_CHECK_INTERVAL` | `3600` | How often (seconds) the ACME worker checks for certificate renewal. |
+| `ROUTER_TLS_HOSTNAME` | `api.mikrom.spluca.org` | Hostname for the API's managed TLS certificate. The Docker image sets this automatically. |
+| `FRONTEND_TLS_HOSTNAME` | `dashboard.mikrom.spluca.org` | Hostname for the dashboard's managed TLS certificate. |
+| `ROUTER_ADDR` | `http://[fd00::28fb:f0bf:d8d1:183e]:80` | Address of `mikrom-router` used for ACME HTTP-01 challenge verification. |
+| `USE_TLS` | `false` | Enable TLS on the API listener. |
+| `CERTS_DIR` | `/certs/api` | Directory where TLS certificates are stored. |
+| `FRONTEND_URL` | `https://mikrom.spluca.org` | Public URL of the dashboard frontend, used for CORS and redirect construction. |
+
+---
+
+## NATS Timeouts
+
+All timeout values are in seconds. Increase these on high-latency or heavily loaded deployments.
+
+| Variable | Default | Description |
+|---|---|---|
+| `NATS_REQUEST_TIMEOUT_SECS` | `5` | Timeout for standard NATS request/reply calls. |
+| `NATS_SCHEDULER_LONG_TIMEOUT_SECS` | `15` | Timeout for scheduler operations that may involve queuing or coordination. |
+| `NATS_SCHEDULER_DATABASE_TIMEOUT_SECS` | `10` | Timeout for scheduler messages that trigger database-backed operations. |
+| `NATS_STORAGE_TIMEOUT_SECS` | `30` | Timeout for storage-related NATS messages (e.g. volume operations). |
+
+---
+
+## Rate Limiting
+
+Per-route RPM limits are optional. When a variable is unset, the route is unlimited. The shared tuning knobs below apply to all routes.
+
+### Per-route Limits (requests per minute)
+
+| Variable | Default | Route or action |
+|---|---|---|
+| `RATE_LIMIT_PUBLIC_RPM` | `300` | Unauthenticated public endpoints. |
+| `RATE_LIMIT_AUTH_LOGIN_RPM` | `120` | Login endpoint. |
+| `RATE_LIMIT_AUTH_REGISTER_RPM` | `60` | Registration endpoint. |
+| `RATE_LIMIT_GITHUB_INSTALL_RPM` | `120` | GitHub App installation callback. |
+| `RATE_LIMIT_APPS_CREATE_RPM` | `120` | Application creation. |
+| `RATE_LIMIT_APPS_DEPLOY_RPM` | `120` | Deployment triggers. |
+| `RATE_LIMIT_WEBHOOKS_GITHUB_GENERIC_RPM` | `240` | Generic GitHub webhook ingestion. |
+| `RATE_LIMIT_WEBHOOKS_GITHUB_NAMED_RPM` | `240` | Named-app GitHub webhook ingestion. |
+| `RATE_LIMIT_AUTHENTICATED_READ_RPM` | `1200` | Authenticated GET / list operations. |
+| `RATE_LIMIT_AUTHENTICATED_WRITE_RPM` | `600` | Authenticated POST / PATCH / DELETE operations. |
+| `RATE_LIMIT_AUTHENTICATED_STREAM_RPM` | `120` | Authenticated streaming (SSE / log tail) connections. |
+
+### Shared Tuning Knobs
+
+<ParamField body="RATE_LIMIT_ENTRY_TTL_SECS" type="integer" default="900">
+  How long a rate-limit entry lives in the in-memory store after the last request from that IP.
+</ParamField>
+
+<ParamField body="RATE_LIMIT_CLEANUP_INTERVAL_SECS" type="integer" default="60">
+  How often the rate-limiter sweeps expired entries from memory.
+</ParamField>
+
+<ParamField body="RATE_LIMIT_TRUST_PROXY_HEADERS" type="boolean" default="false">
+  When `true`, trust `X-Forwarded-For` / `X-Real-IP` headers for client IP extraction. Enable only when `mikrom-api` sits behind a trusted reverse proxy.
+</ParamField>
+
+---
+
+## GitHub Integration
+
+These variables are required when the GitHub App integration is enabled for automated deployments triggered by push events.
+
+| Variable | Description |
+|---|---|
+| `GITHUB_APP_ID` | Numeric ID of the registered GitHub App. |
+| `GITHUB_APP_SLUG` | URL slug of the GitHub App (used in installation URLs). |
+| `GITHUB_PRIVATE_KEY` | PEM-encoded RSA private key for GitHub App JWT signing. Include the full `-----BEGIN RSA PRIVATE KEY-----` / `-----END RSA PRIVATE KEY-----` block. |
+| `GITHUB_CLIENT_ID` | OAuth Client ID for the GitHub App (user authorization). |
+| `GITHUB_CLIENT_SECRET` | OAuth Client Secret for the GitHub App. |
+| `GITHUB_WEBHOOK_URL_BASE` | Base URL Mikrom should register for GitHub webhook delivery (e.g. `https://api.mikrom.example.com`). |
+
+---
+
+## Polar Billing
+
+Polar billing is optional. The service validates these variables on startup and exits early if `POLAR_ACCESS_TOKEN` or `POLAR_WEBHOOK_SECRET` is missing when billing routes are enabled.
+
+<Warning>
+  `POLAR_ACCESS_TOKEN` must be an **Organization Access Token (OAT)** — not a personal access token. Store it as a secret and never commit it to source control.
+</Warning>
+
+<ParamField body="POLAR_ACCESS_TOKEN" type="string" required>
+  Polar Organization Access Token (OAT). Required when billing is enabled.  
+  Example value shape: `polar_oat_…`
+</ParamField>
+
+<ParamField body="POLAR_WEBHOOK_SECRET" type="string" required>
+  Webhook signing secret from the Polar dashboard. Used to verify incoming webhook payloads.
+</ParamField>
+
+<ParamField body="POLAR_CHECKOUT_PRODUCT_ID" type="string">
+  Polar product ID to use for checkout sessions.
+</ParamField>
+
+<ParamField body="POLAR_API_BASE_URL" type="string">
+  Override the Polar API base URL. Useful for Polar's sandbox environment.  
+  Example: `https://sandbox-api.polar.sh/v1`
+</ParamField>
+
+<ParamField body="POLAR_SERVER" type="string">
+  Shorthand server selector (`sandbox` or `production`). Use `POLAR_API_BASE_URL` for more control.
+</ParamField>
+
+---
+
+## Neon Database
+
+These variables configure `mikrom-api` to provision and manage Neon-backed PostgreSQL databases running on the platform's Cloud Hypervisor microVM path. All `NEON_*` variables are optional — omitting them disables Neon database provisioning.
+
+| Variable | Description |
+|---|---|
+| `NEON_PAGESERVER_URL` | HTTP URL of the Neon page server. |
+| `NEON_SAFEKEEPER_HTTP_URL` | HTTP URL of the Neon safekeeper node. |
+| `NEON_BEARER_TOKEN` | Bearer token for authenticating requests to the Neon page server. |
+| `NEON_SAFEKEEPER_TOKEN` | Bearer token for authenticating requests to the Neon safekeeper. |
+| `NEON_JWKS_JSON` | Inline JSON Web Key Set for Neon JWT validation. Takes precedence over `NEON_JWKS_PATH`. |
+| `NEON_JWKS_PATH` | Path to a file containing the JWKS for Neon JWT validation. |
+| `NEON_INSTANCE_ID` | Identifier for the Neon instance managed by this API deployment. |
+| `NEON_SAFEKEEPER_CONNSTRS` | Comma-separated PostgreSQL connection strings for the Neon safekeeper nodes. |
+| `MIKROM_NEON_DEV_MODE` | Set to `true` to enable Neon development mode (relaxed validation). Default: `true` in dev. |
+| `NEON_CONFIGURE_TOKEN` | Optional: pre-minted JWT to use when configuring Neon, instead of having the API mint one. |
+| `NEON_CONFIGURE_PRIVATE_KEY_PEM` | Inline PEM-encoded private key for signing Neon configuration JWTs. |
+| `NEON_CONFIGURE_PRIVATE_KEY_PATH` | Path to a PEM file containing the private key for signing Neon configuration JWTs. |
+
+---
+
+## Observability
+
+See the [Observability configuration page](/configuration/observability) for a full setup guide. The variables below are read by `mikrom-api` at startup.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENABLE_TELEMETRY` | `true` | Enable OpenTelemetry trace and metric export. |
+| `DT_API_URL` | `http://[::1]:4318/api/v2/otlp` | Dynatrace (or local OTLP collector) ingest URL. |
+| `DT_API_TOKEN` | — | Dynatrace API token. Leave unset for local dev against the `otel-lgtm` stack. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://[::1]:4318/api/v2/otlp` | OTLP HTTP endpoint for trace and metric export. |
+| `LOG_FORMAT` | `json` | Log output format. Use `json` for structured production logs; omit or set to any other value for human-readable output. |
+
+---
+
+## Full `.env` Example
+
+The following block mirrors the upstream `.env.example` and can be used as a starting point for local development.
+
+```env
+# ── Core ──────────────────────────────────────────────────────────────────────
+DATABASE_URL=postgres://mikrom:mikrom_password@[::1]:5432/mikrom_api
+ROUTER_DATABASE_URL=postgres://mikrom:mikrom_password@[::1]:5432/mikrom_router
+NATS_URL=nats://[::1]:4222
+TEST_NATS_URL=nats://[::1]:4223
+DEPLOYMENT_ENV=development
+
+# ── API Settings ──────────────────────────────────────────────────────────────
+API_PORT=5001
+JWT_SECRET=secret
+MASTER_KEY=default-master-key-change-me-in-production
+
+# ── ACME / TLS ────────────────────────────────────────────────────────────────
+ACME_EMAIL=admin@mikrom.spluca.org
+ACME_STAGING=true
+ACME_CHECK_INTERVAL=3600
+ROUTER_ADDR=http://[fd00::28fb:f0bf:d8d1:183e]:80
+FRONTEND_URL=https://mikrom.spluca.org
+USE_TLS=false
+CERTS_DIR=/certs/api
+
+# ── Rate Limiting ─────────────────────────────────────────────────────────────
+RATE_LIMIT_PUBLIC_RPM=300
+RATE_LIMIT_AUTH_LOGIN_RPM=120
+RATE_LIMIT_AUTH_REGISTER_RPM=60
+RATE_LIMIT_GITHUB_INSTALL_RPM=120
+RATE_LIMIT_APPS_CREATE_RPM=120
+RATE_LIMIT_APPS_DEPLOY_RPM=120
+RATE_LIMIT_WEBHOOKS_GITHUB_GENERIC_RPM=240
+RATE_LIMIT_WEBHOOKS_GITHUB_NAMED_RPM=240
+RATE_LIMIT_AUTHENTICATED_READ_RPM=1200
+RATE_LIMIT_AUTHENTICATED_WRITE_RPM=600
+RATE_LIMIT_AUTHENTICATED_STREAM_RPM=120
+RATE_LIMIT_ENTRY_TTL_SECS=900
+RATE_LIMIT_CLEANUP_INTERVAL_SECS=60
+RATE_LIMIT_TRUST_PROXY_HEADERS=false
+
+# ── Polar Billing ─────────────────────────────────────────────────────────────
+POLAR_ACCESS_TOKEN=polar_oat_replace_me
+POLAR_WEBHOOK_SECRET=replace-me-with-your-polar-webhook-secret
+POLAR_CHECKOUT_PRODUCT_ID=
+# POLAR_API_BASE_URL=https://sandbox-api.polar.sh/v1
+# POLAR_SERVER=sandbox
+
+# ── GitHub Integration ────────────────────────────────────────────────────────
+GITHUB_APP_ID=
+GITHUB_APP_SLUG=
+GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_WEBHOOK_URL_BASE=
+
+# ── Neon Database ─────────────────────────────────────────────────────────────
+NEON_PAGESERVER_URL=
+NEON_SAFEKEEPER_HTTP_URL=
+NEON_BEARER_TOKEN=
+NEON_SAFEKEEPER_TOKEN=
+NEON_JWKS_JSON=
+NEON_JWKS_PATH=
+NEON_INSTANCE_ID=
+MIKROM_NEON_DEV_MODE=true
+NEON_CONFIGURE_TOKEN=
+NEON_CONFIGURE_PRIVATE_KEY_PEM=
+NEON_CONFIGURE_PRIVATE_KEY_PATH=
+
+# ── Observability ─────────────────────────────────────────────────────────────
+ENABLE_TELEMETRY=true
+DT_API_URL=http://[::1]:4318/api/v2/otlp
+# DT_API_TOKEN=
+OTEL_EXPORTER_OTLP_ENDPOINT=http://[::1]:4318/api/v2/otlp
+LOG_FORMAT=json
+```

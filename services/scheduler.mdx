@@ -1,0 +1,133 @@
+---
+title: "mikrom-scheduler: Placement Engine and Worker Registry"
+sidebarTitle: "Scheduler"
+description: "mikrom-scheduler maintains the worker registry, scores candidates from agent heartbeat metrics, and drives microVM creation via mikrom-agent over NATS."
+---
+
+`mikrom-scheduler` is the placement engine for the Mikrom platform. It maintains a live registry of available worker nodes, tracks their CPU and RAM capacity as reported by agent heartbeats, and makes binding placement decisions when `mikrom-api` submits a deployment request. Once a worker is selected, the scheduler instructs the `mikrom-agent` on that node to create the microVM. The scheduler is intentionally narrow in scope: it owns placement and worker state, not routing, DNS, or certificate management.
+
+## Responsibilities
+
+<CardGroup cols={2}>
+  <Card title="Worker Registry" icon="server">
+    Tracks all available worker nodes and their current capacity. Workers are registered and refreshed via periodic NATS heartbeats from `mikrom-agent`.
+  </Card>
+  <Card title="Placement Decisions" icon="bullseye">
+    Scores candidate workers based on reported CPU and RAM metrics and selects the best fit for each deployment request.
+  </Card>
+  <Card title="Agent Coordination" icon="plug">
+    Issues VM creation and cleanup commands to `mikrom-agent` on the selected worker node via NATS request-reply.
+  </Card>
+  <Card title="Cluster State" icon="database">
+    Persists placement history and job lifecycle state in PostgreSQL. Runs background sweeps to clean up stale VMs and deployments.
+  </Card>
+</CardGroup>
+
+## How Placement Works
+
+<Steps>
+  <Step title="Deployment request arrives from mikrom-api">
+    `mikrom-api` publishes a placement request to NATS. The request includes the workload's resource requirements (CPU and RAM) and the OCI image reference produced by `mikrom-builder`.
+  </Step>
+  <Step title="Scheduler evaluates worker capacity">
+    The scheduler queries its in-memory worker registry, filtering out nodes that lack sufficient free CPU or RAM. Remaining candidates are scored by available headroom.
+  </Step>
+  <Step title="Worker selected">
+    The highest-scoring worker is selected as the placement target. The decision is persisted to PostgreSQL before the command is issued.
+  </Step>
+  <Step title="Agent instructed to create the microVM">
+    The scheduler sends a NATS request to the `mikrom-agent` running on the selected worker node, providing the VM configuration. The agent boots the microVM and returns an acknowledgement.
+  </Step>
+  <Step title="Placement confirmed to mikrom-api">
+    Once the agent acknowledges VM creation, the scheduler replies to `mikrom-api`'s original request with the placement result. The API updates deployment state and triggers route registration in `mikrom-router`.
+  </Step>
+</Steps>
+
+## Worker Registry
+
+Workers self-register when `mikrom-agent` starts. The scheduler tracks each worker by its `MIKROM_HOST_ID` and updates capacity estimates from the metrics included in heartbeat messages.
+
+```text
+mikrom-agent  ──NATS heartbeat (CPU, RAM, disk)──►  mikrom-scheduler (registry)
+              ──NATS heartbeat────────────────────►  (refresh, TTL extended)
+              (silence / timeout)                    → worker marked unavailable
+```
+
+Workers that stop sending heartbeats are eventually evicted from the active registry. Only workers in the active registry are eligible for new placements.
+
+## NATS Coordination
+
+The scheduler uses NATS request-reply for synchronous placement interactions. Two separate timeout values govern the two most latency-sensitive flows:
+
+| Variable | Default | Description |
+|---|---|---|
+| `NATS_SCHEDULER_LONG_TIMEOUT_SECS` | `15` | Timeout for the full placement request (API → scheduler → agent) |
+| `NATS_SCHEDULER_DATABASE_TIMEOUT_SECS` | `10` | Timeout for scheduler-side database operations during placement |
+
+<Note>
+  These timeout variables are read by `mikrom-api` (which initiates the NATS request) as well as by the scheduler itself. Both services must agree on the timeout budget for the interaction to succeed reliably.
+</Note>
+
+## Runtime Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | required | PostgreSQL connection string for placement state |
+| `NATS_URL` | required | NATS server URL |
+| `AGENT_REQUEST_TIMEOUT_SECS` | `30` | Timeout for scheduler-to-agent NATS requests |
+| `VM_CLEANUP_INTERVAL_SECS` | `3600` | How often the VM cleanup sweep runs |
+| `VM_CLEANUP_TTL_SECS` | `3600` | Minimum age before a VM is eligible for cleanup |
+| `BETA_DEPLOYMENT_CLEANUP_ENABLED` | `false` | Enable the beta deployment cleanup sweep (off in production) |
+| `BETA_DEPLOYMENT_CLEANUP_INTERVAL_SECS` | `3600` | Interval for the beta deployment cleanup sweep |
+
+<Warning>
+  Leave `BETA_DEPLOYMENT_CLEANUP_ENABLED=false` in production. This sweep deletes **all** deployments and their VMs on the configured interval and is intended only for development and testing environments.
+</Warning>
+
+## Scope Boundaries
+
+The scheduler is responsible for **placement** only. The following concerns are explicitly out of scope:
+
+| Concern | Owned by |
+|---|---|
+| Ingress routing and TLS | [`mikrom-router`](/services/router) |
+| Internal DNS resolution | [`mikrom-dns`](/services/dns) |
+| WireGuard mesh configuration | [`mikrom-network`](/services/networking) |
+| OCI image building | [`mikrom-builder`](/services/builder) |
+| Auth and app lifecycle | `mikrom-api` |
+
+## Stack
+
+- **Rust 2024** — service runtime
+- **Tokio** — async executor
+- **async-nats** — NATS request-reply for placement and agent coordination
+- **SQLx + PostgreSQL** — persistent placement state and worker registry snapshots
+
+## Dockerfile
+
+The scheduler ships a `Dockerfile` for containerized production deployments:
+
+```bash
+# mikrom-scheduler/Dockerfile
+docker build -f mikrom-scheduler/Dockerfile .
+```
+
+## Local Development
+
+```bash
+make run-scheduler               # Start the scheduler against local NATS and Postgres
+cargo run -p mikrom-scheduler
+cargo nextest run -p mikrom-scheduler
+make ci-smoke
+make ci-fast
+make ci-full
+```
+
+## Testing
+
+- Integration tests use an ephemeral `TestDb` helper. They default to `postgres://mikrom:mikrom_password@localhost:5432/mikrom_scheduler_test` when `TEST_DATABASE_URL` is not set.
+- The ignored NATS and scheduler end-to-end integration suites are exercised by `make ci-external-tests`.
+
+<Tip>
+  When changing placement logic or worker scoring, validate with the full agent + networking services running rather than unit-testing the scorer in isolation. Worker capacity metrics and heartbeat timing interact in ways that only appear under realistic load.
+</Tip>

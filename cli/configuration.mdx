@@ -1,0 +1,206 @@
+---
+title: "Configuring the mikrom CLI: API URL and Project Context"
+sidebarTitle: "Configuration"
+description: "Learn how to configure the mikrom CLI with a custom API URL, active project, authentication tokens, and environment variable overrides."
+---
+
+The `mikrom` CLI stores its settings in a TOML file on disk and optionally merges in environment variable overrides at startup. Understanding the configuration model is particularly important when pointing the CLI at a self-hosted Mikrom instance, switching between multiple projects, or setting up automation with Personal Access Tokens instead of interactive session credentials.
+
+## Config File Location
+
+The configuration file is resolved in the following order of precedence:
+
+1. The path in the `MIKROM_CONFIG_PATH` environment variable (if set).
+2. The platform default: `~/.config/mikrom/config.toml` on Linux and macOS (using the `dirs` crate convention). On macOS this resolves to `~/Library/Application Support/mikrom/config.toml`, and on Windows to `%APPDATA%\mikrom\config.toml`.
+
+The directory is created automatically the first time a value is written. You can always inspect or edit the file directly — it is plain TOML.
+
+## Config File Format
+
+A fully populated configuration file looks like this:
+
+```toml
+api_url = "https://api.yourdomain.com"
+token = "eyJhbGciOiJIUzI1NiJ9..."
+active_project_slug = "abc123"
+request_timeout_secs = 30
+delete_timeout_secs = 120
+restore_timeout_secs = 60
+long_timeout_secs = 30
+```
+
+All fields are optional. The CLI falls back to safe defaults when a field is absent.
+
+## Configuration Keys
+
+| Key | CLI name | Default | Description |
+|---|---|---|---|
+| `api_url` | `api-url` | `http://localhost:5001` | Base URL of the Mikrom API |
+| `token` | — | *(none)* | Session token written by `mikrom auth login` |
+| `active_project_slug` | `active-project` | *(none)* | 6-char project slug used as the active tenant context |
+| `request_timeout_secs` | — | `30` | HTTP request timeout in seconds |
+| `delete_timeout_secs` | — | `120` | Timeout for delete operations in seconds |
+| `restore_timeout_secs` | — | `60` | Timeout for snapshot restore operations in seconds |
+| `long_timeout_secs` | — | `30` | Timeout for long-polling operations in seconds |
+
+<Note>
+The `active_project_slug` field is also accepted under the legacy alias `active_tenant_id` for backwards compatibility with older config files.
+</Note>
+
+## The `mikrom config` Commands
+
+### Display current settings
+
+```bash
+mikrom config show
+```
+
+Prints all active configuration values, including any overrides coming from environment variables.
+
+### Set a configuration value
+
+```bash
+mikrom config set <key> <value>
+```
+
+Keys use the hyphenated form. For example:
+
+```bash
+# Point the CLI at a self-hosted instance
+mikrom config set api-url https://api.yourdomain.com
+
+# Switch to a specific project without going through interactive prompts
+mikrom config set active-project abc123
+```
+
+The change is persisted to the config file immediately.
+
+## Environment Variable Overrides
+
+The CLI loads a `.env` file from the working directory (via [dotenvy](https://docs.rs/dotenvy)) and then applies any `MIKROM_*`-prefixed environment variables (via [envy](https://docs.rs/envy)). Environment variables take precedence over the config file.
+
+| Environment variable | Config key | Description |
+|---|---|---|
+| `MIKROM_API_URL` | `api_url` | Override the API base URL |
+| `MIKROM_TOKEN` | `token` | Override the authentication token |
+| `MIKROM_ACTIVE_PROJECT_SLUG` | `active_project_slug` | Override the active project slug |
+| `MIKROM_REQUEST_TIMEOUT_SECS` | `request_timeout_secs` | Override request timeout |
+| `MIKROM_DELETE_TIMEOUT_SECS` | `delete_timeout_secs` | Override delete timeout |
+| `MIKROM_RESTORE_TIMEOUT_SECS` | `restore_timeout_secs` | Override restore timeout |
+| `MIKROM_LONG_TIMEOUT_SECS` | `long_timeout_secs` | Override long-polling timeout |
+| `MIKROM_CONFIG_PATH` | — | Use a custom path for the config file |
+
+<Tip>
+In CI/CD environments, inject `MIKROM_TOKEN` and `MIKROM_API_URL` as secrets rather than storing them in a config file. The CLI picks them up automatically without any additional flags.
+</Tip>
+
+## Authentication Tokens
+
+When you run `mikrom auth login`, the returned session token is written to the `token` field in the config file:
+
+```bash
+mikrom auth login --email user@example.com --password secret
+```
+
+The token is then sent as a bearer credential on every subsequent API request. It remains in the config file until you log in again or manually remove it.
+
+## Personal Access Tokens (PATs)
+
+For automation workflows — CI pipelines, scripts, or tooling that runs without an interactive session — use a Personal Access Token instead of a session credential.
+
+```bash
+# Create a PAT and copy the returned token value
+mikrom pat create my-ci-token
+
+# Use it by setting the MIKROM_TOKEN environment variable
+export MIKROM_TOKEN="pat_..."
+mikrom deployment list
+```
+
+PATs do not expire automatically. Revoke them explicitly when they are no longer needed:
+
+```bash
+mikrom pat revoke <token-id> --yes
+```
+
+See the [PAT reference](/cli/pat) for the full subcommand list.
+
+## Project Context
+
+All resource commands operate within the scope of the active project. There are two ways to switch context:
+
+- `mikrom project switch <tenant-id>` — persists the change to the config file and updates the active project for all subsequent commands.
+- `mikrom config set active-project <tenant-id>` — writes the slug directly to the config file with no additional API call.
+
+```bash
+# Find the tenant ID for a project
+mikrom project list
+
+# Switch context
+mikrom project switch abc123
+
+# Verify
+mikrom config show
+```
+
+<Note>
+The `active_project_slug` is a 6-character slug, not a display name. Use `mikrom project list` to find the correct value.
+</Note>
+
+## Configuring the CLI for a Self-Hosted Instance
+
+<Steps>
+  <Step title="Point the CLI at your API">
+    Set the `api-url` to the base URL of your self-hosted Mikrom API:
+
+    ```bash
+    mikrom config set api-url https://api.yourdomain.com
+    ```
+  </Step>
+  <Step title="Authenticate">
+    Log in with your account credentials. The session token is saved to the config file automatically:
+
+    ```bash
+    mikrom auth login --email you@example.com --password yourpassword
+    ```
+
+    Confirm the session is active:
+
+    ```bash
+    mikrom auth whoami
+    ```
+  </Step>
+  <Step title="Set the active project">
+    List your projects to find the 6-char tenant slug, then set it as the active context:
+
+    ```bash
+    mikrom project list
+    mikrom config set active-project abc123
+    ```
+  </Step>
+  <Step title="Verify the full configuration">
+    Review all active settings in one command:
+
+    ```bash
+    mikrom config show
+    ```
+
+    You should see `api-url`, `token`, and `active-project` all populated correctly.
+  </Step>
+</Steps>
+
+## Example: Full Config File
+
+```toml
+api_url = "https://api.yourdomain.com"
+token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLWlkIn0.signature"
+active_project_slug = "abc123"
+request_timeout_secs = 30
+delete_timeout_secs = 120
+restore_timeout_secs = 60
+long_timeout_secs = 30
+```
+
+<Warning>
+The config file contains your session token in plain text. Restrict its permissions (`chmod 600 ~/.config/mikrom/config.toml`) and avoid committing it to version control.
+</Warning>
