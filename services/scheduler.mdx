@@ -55,19 +55,6 @@ mikrom-agent  ──NATS heartbeat (CPU, RAM, disk)──►  mikrom-scheduler (
 
 Workers that stop sending heartbeats are eventually evicted from the active registry. Only workers in the active registry are eligible for new placements.
 
-## NATS Coordination
-
-The scheduler uses NATS request-reply for synchronous placement interactions. Two separate timeout values govern the two most latency-sensitive flows:
-
-| Variable | Default | Description |
-|---|---|---|
-| `NATS_SCHEDULER_LONG_TIMEOUT_SECS` | `15` | Timeout for the full placement request (API → scheduler → agent) |
-| `NATS_SCHEDULER_DATABASE_TIMEOUT_SECS` | `10` | Timeout for scheduler-side database operations during placement |
-
-<Note>
-  These timeout variables are read by `mikrom-api` (which initiates the NATS request) as well as by the scheduler itself. Both services must agree on the timeout budget for the interaction to succeed reliably.
-</Note>
-
 ## Runtime Configuration
 
 | Variable | Default | Description |

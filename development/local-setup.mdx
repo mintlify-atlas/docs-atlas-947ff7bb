@@ -137,6 +137,12 @@ make run-router     # mikrom-router (Pingora)
 make run-app        # mikrom-app SvelteKit dev server on port 3001
 ```
 
+To install the `mikrom` CLI binary into `~/.cargo/bin` so it is available on your `PATH`:
+
+```bash
+make install-cli
+```
+
 ## Environment Files
 
 Every service reads its configuration from a `.env` file in its own directory. Copy the provided example and fill in the required secrets before running:

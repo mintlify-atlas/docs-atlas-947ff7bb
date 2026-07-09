@@ -204,6 +204,7 @@ The following block mirrors the upstream `.env.example` and can be used as a sta
 # ── Core ──────────────────────────────────────────────────────────────────────
 DATABASE_URL=postgres://mikrom:mikrom_password@[::1]:5432/mikrom_api
 ROUTER_DATABASE_URL=postgres://mikrom:mikrom_password@[::1]:5432/mikrom_router
+REDIS_URL=redis://[::1]:6379
 NATS_URL=nats://[::1]:4222
 TEST_NATS_URL=nats://[::1]:4223
 DEPLOYMENT_ENV=development
@@ -262,6 +263,7 @@ NEON_JWKS_JSON=
 NEON_JWKS_PATH=
 NEON_INSTANCE_ID=
 MIKROM_NEON_DEV_MODE=true
+MIKROM_INIT_TRACE_FILES=
 NEON_CONFIGURE_TOKEN=
 NEON_CONFIGURE_PRIVATE_KEY_PEM=
 NEON_CONFIGURE_PRIVATE_KEY_PATH=

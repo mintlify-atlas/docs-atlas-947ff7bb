@@ -1,7 +1,7 @@
 ---
 title: "Mikrom Architecture: Services, Flow, and Coordination"
 sidebarTitle: "Architecture"
-description: "A deep-dive into Mikrom's control plane, traffic plane, and platform services — covering request flow, NATS coordination, and per-service responsibilities."
+description: "A deep-dive into Mikrom's control plane, traffic plane, and platform services: request flow, NATS coordination, and per-service responsibilities."
 ---
 
 Mikrom is composed of focused, independently deployable Rust services that coordinate over NATS and share state through PostgreSQL. The platform splits cleanly into three planes: a **control plane** that manages application lifecycle from Git commit to running microVM, a **traffic plane** that carries live user requests to those microVMs, and a set of **platform services** that provide mesh networking, internal DNS, and the guest boot environment. Understanding which plane each service belongs to is the fastest way to reason about a deployment issue or trace a request end-to-end.

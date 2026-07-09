@@ -1,5 +1,5 @@
 ---
-title: "Managing PostgreSQL Databases with Neon"
+title: "Managing Neon-Backed PostgreSQL Databases on Mikrom"
 sidebarTitle: "Databases"
 description: "Provision and manage Neon-backed PostgreSQL databases on Mikrom, with connection tunnels, branching, snapshots, and backup visibility via the CLI."
 ---
@@ -32,9 +32,10 @@ mikrom db create orders \
 | `--vcpus` | `1` | CPU cores allocated to the database VM (1–4) |
 | `--memory` | `512M` | Memory allocated (512M, 1G, 2G, or 4G) |
 | `--disk` | `1024` | Disk size in MiB |
+| `--settings` | — | Additional database settings as `key=value` pairs (repeatable) |
 
 <Note>
-  The `--memory` and `--disk` flags both accept **integer MiB values**. `512M`, `1G`, `2G`, and `4G` are the valid memory presets (the CLI converts them to MiB internally). The `--disk` flag takes a raw MiB integer — for example, `--disk 2048` provisions a 2 GiB disk.
+  The `--memory` flag accepts the string presets `512M`, `1G`, `2G`, and `4G` (the CLI converts them to MiB internally). The `--disk` flag takes a raw MiB integer — for example, `--disk 2048` provisions a 2 GiB disk.
 </Note>
 
 ## Listing Databases
@@ -69,23 +70,6 @@ SSH Tunnel:
 
 psql Command (through tunnel):
   psql "host=localhost port=5432 dbname=orders user=mikrom"
-```
-
-To retrieve the same information as structured data for scripting:
-
-```bash
-mikrom db connection <id> --output json
-```
-
-```json
-{
-  "ssh_tunnel": "ssh -L 5432:localhost:5432 mikrom@<vm-ip> -i ~/.ssh/mikrom_key -N",
-  "psql": "psql \"host=localhost port=5432 dbname=orders user=mikrom\"",
-  "host": "localhost",
-  "port": 5432,
-  "dbname": "orders",
-  "user": "mikrom"
-}
 ```
 
 <Tip>

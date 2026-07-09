@@ -1,7 +1,7 @@
 ---
 title: "mikrom deployment: Live Instance (Job) Management Commands"
-sidebarTitle: "deployment"
-description: "Inspect, control, and snapshot live microVM instances with mikrom deployment. Stop, pause, resume, and manage VM snapshots for running Firecracker and Cloud Hypervisor jobs."
+sidebarTitle: "Deployment"
+description: "Inspect, control, and snapshot live deployment jobs with mikrom deployment. Stop, pause, resume, and manage VM snapshots for microVM instances."
 ---
 
 The `mikrom deployment` command group manages the live instances — referred to internally as **jobs** — that run your application workloads inside Firecracker or Cloud Hypervisor microVMs. A *deployment* in this context is a running VM instance identified by a unique `--job-id`, as distinct from the deployment record (build artifact) listed by `mikrom app deployments`. Use these commands to inspect instance state, control VM lifecycle, and take or restore point-in-time snapshots of running microVM memory and disk.

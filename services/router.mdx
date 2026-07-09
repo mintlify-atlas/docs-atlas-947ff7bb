@@ -91,14 +91,13 @@ The router reads all configuration from environment variables. The following are
 |---|---|---|
 | `DATABASE_URL` | required | PostgreSQL connection string for traffic-plane state |
 | `NATS_URL` | required | NATS server URL for route-update events |
-| `ROUTER_TLS_HOSTNAME` | required | Primary hostname the router serves TLS for |
-| `ACME_EMAIL` | required | Contact email registered with Let's Encrypt |
+| `MASTER_KEY` | required | Encryption key for router secrets |
 | `ACME_STAGING` | `false` | `true` to use Let's Encrypt staging for app hostnames |
-| `WIREGUARD_PORT` | `51823` | WireGuard listen port for the mesh |
-| `ROUTER_THREADS` | — | Number of Pingora worker threads |
-| `RPS_LIMIT` | — | Optional requests-per-second rate limit |
-| `API_UPSTREAM_TARGETS` | — | Override targets for `api.mikrom.spluca.org` proxy |
-| `WEB_UPSTREAM_TARGETS` | — | Override targets for the dashboard proxy |
+| `WIREGUARD_PORT` | `51822` | WireGuard listen port for the mesh |
+| `ROUTER_THREADS` | available CPUs | Number of Pingora worker threads |
+| `RPS_LIMIT` | `100` | Requests-per-second rate limit |
+| `API_UPSTREAM_TARGETS` | `127.0.0.1:5001,[::1]:5001` | Override targets for `api.mikrom.spluca.org` proxy |
+| `WEB_UPSTREAM_TARGETS` | `127.0.0.1:5173,[::1]:5173` | Override targets for the dashboard proxy |
 
 ### Timeout Tuning
 

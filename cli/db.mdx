@@ -37,32 +37,32 @@ mikrom db create <name> [--engine <engine>] [--version <version>] \
   Unique display name for the database within the current project.
 </ParamField>
 
-<ParamField query="--engine" type="string" default="neon">
+<ParamField query="--engine / -e" type="string" default="neon">
   Database engine. Currently supported: `neon`.
 </ParamField>
 
-<ParamField query="--version" type="number" default="16">
-  PostgreSQL major version to provision (e.g. `16`).
+<ParamField query="--version / -V" type="number" default="16">
+  PostgreSQL major version to provision (e.g. `16`). Short flag is `-V` (capital V).
 </ParamField>
 
 <ParamField query="--vcpus" type="number" default="1">
-  Number of CPU cores to allocate. Accepted values: `1`, `2`, `3`, `4`.
+  Number of CPU cores to allocate. Accepted values: `1`, `2`, `3`, `4`. This flag has no short form.
 </ParamField>
 
-<ParamField query="--memory" type="string" default="512M">
+<ParamField query="--memory / -m" type="string" default="512M">
   Memory to allocate. Accepted values: `512M`, `1G`, `2G`, `4G`.
 </ParamField>
 
-<ParamField query="--disk" type="number" default="1024">
+<ParamField query="--disk / -d" type="number" default="1024">
   Disk size for the database volume, expressed in MiB.
 </ParamField>
 
-<ParamField query="--settings" type="string[]">
+<ParamField query="--settings / -s" type="string[]">
   One or more `key=value` pairs forwarded as database engine settings, e.g. `--settings max_connections=200`.
 </ParamField>
 
 <Note>
-  The `--disk` flag is specified in **MiB** (mebibytes). The default of `1024` equals 1 GiB. To provision a 10 GiB disk, pass `--disk 10240`.
+  The `--disk` flag is specified in **MiB** (mebibytes). The default of `1024` equals 1 GiB. To provision a 10 GiB disk, pass `--disk 10240`. The `--version` short flag is `-V` (capital V), and `--vcpus` has no short flag.
 </Note>
 
 **Example — minimal create**
@@ -95,7 +95,7 @@ mikrom db delete <id> [--yes]
   Name or ID of the database to delete.
 </ParamField>
 
-<ParamField query="--yes" type="boolean" default="false">
+<ParamField query="--yes / -y" type="boolean" default="false">
   Skip the interactive confirmation prompt.
 </ParamField>
 
@@ -136,15 +136,11 @@ Show the connection details required to reach a database from your local machine
 - A **JSON** representation of the same metadata when `--output json` is passed.
 
 ```bash
-mikrom db connection <id> [--output table|json]
+mikrom db connection <id>
 ```
 
 <ParamField path="id" type="string" required>
   Name or ID of the database.
-</ParamField>
-
-<ParamField query="--output" type="string" default="table">
-  Output format. Use `json` for machine-readable output.
 </ParamField>
 
 **Example — table output (default)**

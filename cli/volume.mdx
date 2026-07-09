@@ -14,7 +14,7 @@ List all persistent volumes in the current project, optionally filtered to a spe
 mikrom volume list [--app <name>]
 ```
 
-<ParamField query="--app" type="string">
+<ParamField query="--app / -a" type="string">
   Filter the listing to volumes attached to, or associated with, this application name.
 </ParamField>
 
@@ -40,11 +40,11 @@ Create a new persistent volume with a display name and a size in MiB. The volume
 mikrom volume create --name <name> --size <MiB>
 ```
 
-<ParamField query="--name" type="string" required>
+<ParamField query="--name / -n" type="string" required>
   Human-readable display name for the volume (e.g. `uploads-prod`).
 </ParamField>
 
-<ParamField query="--size" type="number" required>
+<ParamField query="--size / -s" type="number" required>
   Requested volume size, expressed in **MiB** (mebibytes).
 </ParamField>
 
@@ -68,20 +68,20 @@ Attach an existing volume to an application at a specified path inside the VM. Y
 mikrom volume attach --app <name> --volume-id <id> --mount <path> [--mode 0|1|2]
 ```
 
-<ParamField query="--app" type="string" required>
+<ParamField query="--app / -a" type="string" required>
   Name of the application to attach the volume to.
 </ParamField>
 
 <ParamField query="--volume-id" type="string" required>
-  ID of the volume to attach.
+  ID of the volume to attach. This flag has no short form.
 </ParamField>
 
-<ParamField query="--mount" type="string" required>
+<ParamField query="--mount / -m" type="string" required>
   Absolute path inside the VM where the volume will be mounted (e.g. `/data`).
 </ParamField>
 
-<ParamField query="--mode" type="number" default="0">
-  Access mode for the volume:
+<ParamField query="--mode / -A" type="number" default="0">
+  Access mode for the volume. Short flag is `-A` (capital A).
   - `0` — **RWO** ReadWriteOnce: mounted read-write by a single instance (default).
   - `1` — **RWX** ReadWriteMany: mounted read-write by multiple instances simultaneously.
   - `2` — **ROX** ReadOnlyMany: mounted read-only by multiple instances simultaneously.
@@ -109,12 +109,12 @@ Detach a volume from an application. The volume's data is preserved and the volu
 mikrom volume detach --app <name> --volume-id <id>
 ```
 
-<ParamField query="--app" type="string" required>
+<ParamField query="--app / -a" type="string" required>
   Name of the application to detach the volume from.
 </ParamField>
 
 <ParamField query="--volume-id" type="string" required>
-  ID of the volume to detach.
+  ID of the volume to detach. This flag has no short form.
 </ParamField>
 
 **Example**
@@ -134,10 +134,10 @@ mikrom volume snapshot --volume-id <id> --name <name>
 ```
 
 <ParamField query="--volume-id" type="string" required>
-  ID of the volume to snapshot.
+  ID of the volume to snapshot. This flag has no short form.
 </ParamField>
 
-<ParamField query="--name" type="string" required>
+<ParamField query="--name / -n" type="string" required>
   Descriptive name for the snapshot (e.g. `before-schema-change`).
 </ParamField>
 
@@ -158,10 +158,10 @@ mikrom volume restore --volume-id <id> --snapshot <name>
 ```
 
 <ParamField query="--volume-id" type="string" required>
-  ID of the volume to restore.
+  ID of the volume to restore. This flag has no short form.
 </ParamField>
 
-<ParamField query="--snapshot" type="string" required>
+<ParamField query="--snapshot / -s" type="string" required>
   Name of the snapshot to restore from.
 </ParamField>
 
@@ -186,7 +186,7 @@ mikrom volume snapshots list --volume-id <id>
 ```
 
 <ParamField query="--volume-id" type="string" required>
-  ID of the volume whose snapshots you want to list.
+  ID of the volume whose snapshots you want to list. This flag has no short form.
 </ParamField>
 
 **Example**
@@ -206,10 +206,10 @@ mikrom volume snapshots delete --snapshot-id <id> [--yes]
 ```
 
 <ParamField query="--snapshot-id" type="string" required>
-  ID of the snapshot to delete.
+  ID of the snapshot to delete. This flag has no short form.
 </ParamField>
 
-<ParamField query="--yes" type="boolean" default="false">
+<ParamField query="--yes / -y" type="boolean" default="false">
   Skip the interactive confirmation prompt.
 </ParamField>
 
@@ -234,10 +234,10 @@ mikrom volume delete --volume-id <id> [--yes]
 ```
 
 <ParamField query="--volume-id" type="string" required>
-  ID of the volume to delete.
+  ID of the volume to delete. This flag has no short form.
 </ParamField>
 
-<ParamField query="--yes" type="boolean" default="false">
+<ParamField query="--yes / -y" type="boolean" default="false">
   Skip the interactive confirmation prompt.
 </ParamField>
 

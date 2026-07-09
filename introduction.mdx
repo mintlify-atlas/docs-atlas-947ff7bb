@@ -1,7 +1,7 @@
 ---
-title: "Mikrom: Rust-First Open-Source Edge Platform"
+title: "Mikrom: Rust-First Open-Source Edge Platform Guide"
 sidebarTitle: "Introduction"
-description: "Mikrom deploys containerized apps into Firecracker and Cloud Hypervisor microVMs with automatic TLS, WireGuard mesh networking, and a zero-config Git deployment pipeline."
+description: "Mikrom deploys containerized apps into Firecracker and Cloud Hypervisor microVMs with automatic TLS, WireGuard mesh, and a zero-config Git pipeline."
 ---
 
 Mikrom is a Rust-first, open-source edge platform designed for deploying containerized workloads into lightweight microVMs powered by [Firecracker](https://firecracker-microvm.github.io/) or [Cloud Hypervisor](https://www.cloudhypervisor.org/). Every application gets hardware-level isolation in its own microVM, a dedicated ingress route with automatic TLS, and a placement decision made by a scheduler that coordinates workers over NATS — all driven from a single `mikrom app deploy` command or a push to your Git repository.

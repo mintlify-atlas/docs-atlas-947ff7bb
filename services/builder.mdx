@@ -93,7 +93,7 @@ In production, point `BUILDKIT_HOST` at the BuildKit daemon socket or address fo
 
 | Variable | Default | Description |
 |---|---|---|
-| `NATS_URL` | `nats://localhost:4222` | NATS server URL for build request subscriptions |
+| `NATS_URL` | `nats://[::1]:4222` | NATS server URL for build request subscriptions |
 | `REGISTRY` | `registry.mikrom.spluca.org/mikrom` | Target OCI registry for pushed images |
 | `REGISTRY_URL` | alias for `REGISTRY` | Backward-compatible environment name |
 | `REGISTRY_USER` | — | Registry username for authenticated pushes |

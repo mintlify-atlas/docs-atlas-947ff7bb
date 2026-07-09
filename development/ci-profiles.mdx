@@ -1,5 +1,5 @@
 ---
-title: "Dagger-Based CI Profiles for Mikrom Validation"
+title: "Mikrom CI Profiles: Dagger-Backed Validation Targets"
 sidebarTitle: "CI Profiles"
 description: "Understand every Dagger-backed make ci-* target, when to use each profile, and how the pre-commit hook selects the right one automatically."
 ---
@@ -57,7 +57,7 @@ Run this profile when you touch the NATS consumer/publisher code in any service 
 Executes the agent RBD integration test binary directly on the host (not through Dagger) with the Ceph-specific ignored tests un-ignored:
 
 ```bash
-MIKROM_RUN_CEPH_TESTS=1 make ci-ceph-tests
+make ci-ceph-tests
 # Internally runs:
 # MIKROM_RUN_CEPH_TESTS=1 cargo test -p mikrom-agent \
 #   --test ceph_integration_tests -- --ignored
@@ -120,7 +120,7 @@ Follow this sequence to get maximum signal at minimum cost:
     Run when you modify NATS consumer/publisher logic or `mikrom-api` repository tests. Pass `MIKROM_RUN_NATS_TESTS=1` for the NATS-backed binaries.
   </Step>
   <Step title="ci-ceph-tests — Ceph/RBD changes">
-    Run only on a host with a live Ceph cluster when you modify `mikrom-agent` RBD code. Pass `MIKROM_RUN_CEPH_TESTS=1`.
+    Run only on a host with a live Ceph cluster when you modify `mikrom-agent` RBD code. The Makefile target sets `MIKROM_RUN_CEPH_TESTS=1` internally.
   </Step>
   <Step title="ci-full — before merging">
     Run before opening or merging a PR that changes build logic, native dependencies, or the eBPF path.

@@ -1,7 +1,7 @@
 ---
-title: "Quickstart: Deploy Your First App with Mikrom"
+title: "Quickstart: Run Mikrom Locally and Deploy Your First App"
 sidebarTitle: "Quickstart"
-description: "Install Mikrom's CLI, spin up the local development stack, and deploy a containerized app into a microVM in under ten minutes."
+description: "Install the Mikrom CLI, start the local development stack, and deploy your first containerized app into a microVM in under ten minutes."
 ---
 
 This guide walks you through standing up a local Mikrom development environment, installing the CLI, and deploying your first application into a microVM. By the end you will have a running deployment, a connected database, and a clear picture of the day-to-day workflow.
@@ -210,7 +210,7 @@ Mikrom provisions managed PostgreSQL databases through Neon. Databases run in Cl
     - Full connection metadata in JSON when you pass `--output json`
 
     ```bash
-    mikrom db connection <database-id> --output json
+    mikrom --output json db connection <database-id>
     ```
   </Step>
 </Steps>

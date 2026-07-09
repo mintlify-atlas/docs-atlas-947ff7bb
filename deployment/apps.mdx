@@ -1,7 +1,7 @@
 ---
-title: "Deploying Applications on Mikrom Edge Platform"
+title: "Deploying Applications on the Mikrom Edge Platform"
 sidebarTitle: "Applications"
-description: "Create, deploy, and manage applications on Mikrom using microVM isolation with Firecracker or Cloud Hypervisor, resource presets, and GitHub webhook integration."
+description: "Create, deploy, and manage applications on Mikrom using microVM isolation with Firecracker or Cloud Hypervisor, resource presets, and GitHub webhooks."
 ---
 
 Mikrom deploys applications directly from Git repositories into isolated microVMs running on either Firecracker or Cloud Hypervisor. The builder service automatically detects your project's stack — no configuration files required — and produces an OCI image that the scheduler then places onto available agent nodes. Every deployment gets its own microVM boundary, giving you strong workload isolation without sacrificing the fast startup times that make edge deployments practical.
@@ -63,7 +63,7 @@ The Mikrom builder auto-detects the following stacks from your repository conten
     mikrom app deploy --name my-app --cpu 2 --memory 1G
     ```
 
-    Resource flags are optional — defaults are **1 CPU** and **512 MB RAM**.
+    Resource flags are optional — defaults are **1 CPU** and **512M RAM**.
   </Step>
 
   <Step title="Verify the deployment">
@@ -80,7 +80,7 @@ The Mikrom builder auto-detects the following stacks from your repository conten
 All apps are deployed using fixed resource presets. Fractional or arbitrary values are not supported — choose one from each column.
 
 | Resource | Available Values | Default |
-|----------|-----------------|---------|
+|----------|-----------------|---------| 
 | CPU cores | `1`, `2`, `3`, `4` | `1` |
 | Memory | `512M`, `1G`, `2G`, `4G` | `512M` |
 
